@@ -1,26 +1,271 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* =====================================================
+   THEME DESIGN TOKENS — CSS Custom Properties
+   Applied via class on <html> element by ThemeContext
+   ===================================================== */
+
+/* Default: Neon Purple (Dark) */
+:root,
+html.theme-neon-purple {
+  --bg-base:     #06040d;
+  --bg-card:     rgba(13, 10, 25, 0.6);
+  --bg-nav:      rgba(6, 4, 13, 0.75);
+  --bg-scrollbar-track: #0a0714;
+  --bg-scrollbar-thumb: #271c3f;
+  --bg-radial-1: rgba(139, 92, 246, 0.05);
+  --bg-radial-2: rgba(217, 70, 239, 0.05);
+  --color-text:  #f8fafc;
+  --color-muted: #94a3b8;
+  --color-accent-1: #8b5cf6;
+  --color-accent-2: #d946ef;
+  --color-accent-3: #6366f1;
+  --glow-primary: rgba(139, 92, 246, 0.4);
+  --glow-secondary: rgba(217, 70, 239, 0.4);
+  --gradient-accent: linear-gradient(135deg, #a78bfa 0%, #d946ef 100%);
+  --gradient-btn: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+  --border-card: rgba(255, 255, 255, 0.07);
+  --border-nav:  rgba(255, 255, 255, 0.05);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Neon Green */
+html.theme-neon-green {
+  --bg-base:     #030d06;
+  --bg-card:     rgba(5, 20, 10, 0.65);
+  --bg-nav:      rgba(3, 13, 6, 0.8);
+  --bg-scrollbar-track: #050f08;
+  --bg-scrollbar-thumb: #0d3320;
+  --bg-radial-1: rgba(16, 185, 129, 0.06);
+  --bg-radial-2: rgba(20, 184, 166, 0.06);
+  --color-text:  #f0fdf4;
+  --color-muted: #86efac;
+  --color-accent-1: #10b981;
+  --color-accent-2: #14b8a6;
+  --color-accent-3: #059669;
+  --glow-primary: rgba(16, 185, 129, 0.45);
+  --glow-secondary: rgba(20, 184, 166, 0.4);
+  --gradient-accent: linear-gradient(135deg, #34d399 0%, #14b8a6 100%);
+  --gradient-btn: linear-gradient(135deg, #059669 0%, #0d9488 100%);
+  --border-card: rgba(16, 185, 129, 0.08);
+  --border-nav:  rgba(16, 185, 129, 0.06);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Cyberpunk Orange */
+html.theme-cyberpunk-orange {
+  --bg-base:     #0d0800;
+  --bg-card:     rgba(22, 12, 0, 0.65);
+  --bg-nav:      rgba(13, 8, 0, 0.8);
+  --bg-scrollbar-track: #120a00;
+  --bg-scrollbar-thumb: #3d1f00;
+  --bg-radial-1: rgba(249, 115, 22, 0.06);
+  --bg-radial-2: rgba(245, 158, 11, 0.06);
+  --color-text:  #fffbeb;
+  --color-muted: #fcd34d;
+  --color-accent-1: #f97316;
+  --color-accent-2: #f59e0b;
+  --color-accent-3: #ea580c;
+  --glow-primary: rgba(249, 115, 22, 0.45);
+  --glow-secondary: rgba(245, 158, 11, 0.4);
+  --gradient-accent: linear-gradient(135deg, #fb923c 0%, #fbbf24 100%);
+  --gradient-btn: linear-gradient(135deg, #ea580c 0%, #d97706 100%);
+  --border-card: rgba(249, 115, 22, 0.08);
+  --border-nav:  rgba(249, 115, 22, 0.06);
+}
+
+/* Crimson Red */
+html.theme-crimson-red {
+  --bg-base:     #0d0306;
+  --bg-card:     rgba(22, 5, 10, 0.65);
+  --bg-nav:      rgba(13, 3, 6, 0.8);
+  --bg-scrollbar-track: #120308;
+  --bg-scrollbar-thumb: #3d0a14;
+  --bg-radial-1: rgba(244, 63, 94, 0.06);
+  --bg-radial-2: rgba(239, 68, 68, 0.06);
+  --color-text:  #fff1f2;
+  --color-muted: #fda4af;
+  --color-accent-1: #f43f5e;
+  --color-accent-2: #ef4444;
+  --color-accent-3: #e11d48;
+  --glow-primary: rgba(244, 63, 94, 0.45);
+  --glow-secondary: rgba(239, 68, 68, 0.4);
+  --gradient-accent: linear-gradient(135deg, #fb7185 0%, #f87171 100%);
+  --gradient-btn: linear-gradient(135deg, #e11d48 0%, #dc2626 100%);
+  --border-card: rgba(244, 63, 94, 0.08);
+  --border-nav:  rgba(244, 63, 94, 0.06);
+}
+
+/* Ocean Blue */
+html.theme-ocean-blue {
+  --bg-base:     #020b14;
+  --bg-card:     rgba(4, 18, 30, 0.65);
+  --bg-nav:      rgba(2, 11, 20, 0.8);
+  --bg-scrollbar-track: #030d1a;
+  --bg-scrollbar-thumb: #0a2540;
+  --bg-radial-1: rgba(14, 165, 233, 0.06);
+  --bg-radial-2: rgba(6, 182, 212, 0.06);
+  --color-text:  #f0f9ff;
+  --color-muted: #7dd3fc;
+  --color-accent-1: #0ea5e9;
+  --color-accent-2: #06b6d4;
+  --color-accent-3: #0284c7;
+  --glow-primary: rgba(14, 165, 233, 0.45);
+  --glow-secondary: rgba(6, 182, 212, 0.4);
+  --gradient-accent: linear-gradient(135deg, #38bdf8 0%, #22d3ee 100%);
+  --gradient-btn: linear-gradient(135deg, #0284c7 0%, #0891b2 100%);
+  --border-card: rgba(14, 165, 233, 0.08);
+  --border-nav:  rgba(14, 165, 233, 0.06);
+}
+
+/* Light Mode */
+html.theme-light-mode {
+  --bg-base:     #f5f3ff;
+  --bg-card:     rgba(255, 255, 255, 0.85);
+  --bg-nav:      rgba(250, 248, 255, 0.9);
+  --bg-scrollbar-track: #ede9fe;
+  --bg-scrollbar-thumb: #c4b5fd;
+  --bg-radial-1: rgba(139, 92, 246, 0.07);
+  --bg-radial-2: rgba(217, 70, 239, 0.07);
+  --color-text:  #1e1b4b;
+  --color-muted: #6b7280;
+  --color-accent-1: #7c3aed;
+  --color-accent-2: #c026d3;
+  --color-accent-3: #4f46e5;
+  --glow-primary: rgba(124, 58, 237, 0.3);
+  --glow-secondary: rgba(192, 38, 211, 0.3);
+  --gradient-accent: linear-gradient(135deg, #7c3aed 0%, #c026d3 100%);
+  --gradient-btn: linear-gradient(135deg, #6d28d9 0%, #a21caf 100%);
+  --border-card: rgba(139, 92, 246, 0.15);
+  --border-nav:  rgba(139, 92, 246, 0.1);
+}
+
+/* =====================================================
+   BASE STYLES using theme tokens
+   ===================================================== */
+
+body {
+  background-color: var(--bg-base);
+  color: var(--color-text);
+  font-family: 'Plus Jakarta Sans', 'Outfit', sans-serif;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(circle at 10% 20%, var(--bg-radial-1) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, var(--bg-radial-2) 0%, transparent 40%);
+  background-attachment: fixed;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-scrollbar-thumb);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent-1);
+}
+
+/* Glow effects */
+.glow-purple {
+  box-shadow: 0 0 25px -5px var(--glow-primary);
+}
+
+.glow-fuchsia {
+  box-shadow: 0 0 25px -5px var(--glow-secondary);
+}
+
+.text-glow {
+  text-shadow: 0 0 10px var(--glow-primary);
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card);
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.glass-nav {
+  background: var(--bg-nav);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-nav);
+  transition: background 0.3s ease;
+}
+
+/* Light mode text overrides for Tailwind hardcoded classes */
+html.theme-light-mode .text-slate-100,
+html.theme-light-mode .text-slate-200,
+html.theme-light-mode .text-slate-300 {
+  color: #1e1b4b !important;
+}
+
+html.theme-light-mode .text-slate-400,
+html.theme-light-mode .text-slate-500 {
+  color: #4b5563 !important;
+}
+
+html.theme-light-mode .text-slate-600 {
+  color: #6b7280 !important;
+}
+
+html.theme-light-mode .bg-slate-900,
+html.theme-light-mode .bg-\[\#06040d\] {
+  background-color: #ffffff !important;
+}
+
+html.theme-light-mode body {
+  background-color: var(--bg-base);
+  color: var(--color-text);
+}
+
+/* Shimmer animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
 }
+
+html.theme-light-mode .shimmer {
+  background: linear-gradient(90deg, rgba(0,0,0,0.03) 25%, rgba(0,0,0,0.07) 50%, rgba(0,0,0,0.03) 75%);
+  background-size: 200% 100%;
+}
+
+/* Gradient text */
+.gradient-text-purple {
+  background: var(--gradient-accent);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gradient-text-cyan {
+  background: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Theme transition smoothness */
+html {
+  transition: background-color 0.3s ease;
+}
+
