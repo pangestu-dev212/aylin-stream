@@ -226,8 +226,18 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   // Carousel state
   const [carouselIndex, setCarouselIndex] = useState(0);
 
+  interface FeaturedSlide {
+    title: string;
+    desc: string;
+    img: string;
+    slug: string;
+    type: 'anime' | 'donghua' | 'drama';
+    trailer?: string;
+    source?: string;
+  }
+
   // Featured slides for Carousel
-  const featuredSlides = [
+  const featuredSlides: FeaturedSlide[] = [
     {
       title: "Renegade Immortal (Xian Ni)",
       desc: "Perjalanan kultivasi Wang Lin yang kejam, penuh perjuangan dendam, dan takdir menjadi dewa abadi di dunia persilatan.",
@@ -270,6 +280,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
     lastEpTitle: string;
     lastEpSlug: string;
     timestamp: number;
+    source?: string;
   }
 
   interface ScheduleItem {
@@ -278,6 +289,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
     img: string;
     type: 'anime' | 'donghua' | 'drama';
     time: string;
+    source?: string;
   }
 
   const weeklySchedule: Record<string, ScheduleItem[]> = {
@@ -884,13 +896,13 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
       return;
     }
     const randomItem = allOngoing[Math.floor(Math.random() * allOngoing.length)];
-    window.location.href = `/watch/${randomItem.type}/${randomItem.slug}`;
+    window.location.href = `/watch/${randomItem.type}/${randomItem.slug}${randomItem.source ? `?source=${randomItem.source}` : ''}`;
   };
 
   return (
     <div className="flex flex-col min-h-screen pb-16">
       {/* 1. Header Navbar */}
-      <nav className="sticky top-0 z-50 w-full glass-nav px-4 sm:px-8 py-4 flex items-center justify-between">
+      <nav className="sticky top-0 z-[100] w-full glass-nav px-4 sm:px-8 py-4 flex items-center justify-between">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2">
             <span className="text-2xl font-extrabold tracking-wider bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400 bg-clip-text text-fill-transparent drop-shadow-[0_0_15px_rgba(139,92,246,0.3)]">
@@ -950,7 +962,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
 
             {/* Search Result Overlay */}
             {searchOpen && (
-              <div className="absolute right-0 mt-3 w-[340px] sm:w-[420px] max-h-[480px] overflow-y-auto glass-card rounded-2xl p-4 shadow-2xl z-50">
+              <div className="absolute right-0 mt-3 w-[340px] sm:w-[420px] max-h-[480px] overflow-y-auto glass-card rounded-2xl p-4 shadow-2xl z-[100]">
                 <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-2">
                   <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Hasil Pencarian</span>
                   <span className="text-xs text-slate-500">{searchResults.length} ditemukan</span>
@@ -970,7 +982,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                     {searchResults.map((item) => (
                       <Link
                         key={`${item.type}-${item.slug}`}
-                        href={`/watch/${item.type}/${item.slug}`}
+                        href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
                         className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-xl transition-colors group"
                       >
                         <div className="relative w-12 h-16 rounded-md overflow-hidden bg-slate-800 flex-shrink-0">
@@ -1226,14 +1238,14 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 </p>
                 <div className="flex items-center gap-3 mt-2 flex-wrap">
                   <Link
-                    href={`/watch/${slide.type}/${slide.slug}`}
+                    href={`/watch/${slide.type}/${slide.slug}${slide.source ? `?source=${slide.source}` : ''}`}
                     className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 px-5 sm:px-6 py-2.5 rounded-full text-sm font-bold text-white shadow-lg transition-all hover:scale-105 glow-purple cursor-pointer"
                   >
                     <Play size={16} fill="white" /> Nonton Sekarang
                   </Link>
                   {slide.trailer && (
                     <button
-                      onClick={() => setTrailerUrl(slide.trailer)}
+                      onClick={() => setTrailerUrl(slide.trailer || null)}
                       className="px-5 sm:px-6 py-2.5 bg-slate-900/80 hover:bg-slate-800 text-sm font-bold text-slate-300 rounded-full border border-slate-800 transition-all hover:scale-105 cursor-pointer flex items-center gap-1.5"
                     >
                       🎬 Tonton Trailer
@@ -1310,7 +1322,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 key={`${item.type}-${item.slug}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-violet-500/30"
               >
-                <Link href={`/watch/${item.type}/${item.slug}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
+                <Link href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={item.img ? `/api/image-proxy?url=${encodeURIComponent(item.img)}` : undefined}
@@ -1333,7 +1345,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   </span>
                 </Link>
                 <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                  <Link href={`/watch/${item.type}/${item.slug}`} className="font-bold text-sm text-slate-200 line-clamp-1 group-hover:text-fuchsia-400 transition-colors">
+                  <Link href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`} className="font-bold text-sm text-slate-200 line-clamp-1 group-hover:text-fuchsia-400 transition-colors">
                     {item.title}
                   </Link>
                   <span className="text-[10px] font-semibold text-fuchsia-400 flex items-center gap-1.5 bg-fuchsia-950/40 border border-fuchsia-900/30 w-max px-2 py-0.5 rounded-full">
@@ -1385,7 +1397,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
           {selectedScheduleDay && weeklySchedule[selectedScheduleDay]?.map((item) => (
             <Link
               key={item.slug}
-              href={`/watch/${item.type}/${item.slug}`}
+              href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
               className="flex items-center gap-3.5 p-3 glass-card rounded-2xl border border-white/5 hover:border-indigo-500/30 transition-all duration-300 hover:scale-[1.02] group"
             >
               <div className="relative w-14 h-18 rounded-xl overflow-hidden bg-slate-900 flex-shrink-0">
@@ -1476,7 +1488,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   key={`${anime.type}-${anime.slug}`}
                   className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-violet-500/30"
                 >
-                  <Link href={`/watch/${anime.type}/${anime.slug}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
+                  <Link href={`/watch/${anime.type}/${anime.slug}${anime.source ? `?source=${anime.source}` : ''}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={anime.img ? `/api/image-proxy?url=${encodeURIComponent(anime.img)}` : undefined}
@@ -1499,7 +1511,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                     </span>
                   </Link>
                   <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                    <Link href={`/watch/${anime.type}/${anime.slug}`} className="font-bold text-sm text-slate-200 line-clamp-1 group-hover:text-violet-400 transition-colors">
+                    <Link href={`/watch/${anime.type}/${anime.slug}${anime.source ? `?source=${anime.source}` : ''}`} className="font-bold text-sm text-slate-200 line-clamp-1 group-hover:text-violet-400 transition-colors">
                       {anime.title}
                     </Link>
                     {anime.ep && (
@@ -1546,7 +1558,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 key={`anime-${anime.slug}-${idx}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-violet-500/30"
               >
-                <Link href={`/watch/anime/${anime.slug}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
+                <Link href={`/watch/anime/${anime.slug}${anime.source ? `?source=${anime.source}` : ''}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={anime.img ? `/api/image-proxy?url=${encodeURIComponent(anime.img)}` : undefined}
@@ -1565,7 +1577,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   )}
                 </Link>
                 <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                  <Link href={`/watch/anime/${anime.slug}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-violet-400 transition-colors">
+                  <Link href={`/watch/anime/${anime.slug}${anime.source ? `?source=${anime.source}` : ''}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-violet-400 transition-colors">
                     {anime.title}
                   </Link>
                   {anime.ep && (
@@ -1611,7 +1623,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 key={`donghua-${donghua.slug}-${idx}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-fuchsia-500/30"
               >
-                <Link href={`/watch/donghua/${donghua.slug}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
+                <Link href={`/watch/donghua/${donghua.slug}${donghua.source ? `?source=${donghua.source}` : ''}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={donghua.img ? `/api/image-proxy?url=${encodeURIComponent(donghua.img)}` : undefined}
@@ -1625,7 +1637,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   </div>
                 </Link>
                 <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                  <Link href={`/watch/donghua/${donghua.slug}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-fuchsia-400 transition-colors">
+                  <Link href={`/watch/donghua/${donghua.slug}${donghua.source ? `?source=${donghua.source}` : ''}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-fuchsia-400 transition-colors">
                     {donghua.title}
                   </Link>
                   {donghua.ep && (
@@ -1671,7 +1683,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 key={`drama-${drama.slug}-${idx}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-rose-500/30"
               >
-                <Link href={`/watch/drama/${drama.slug}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
+                <Link href={`/watch/drama/${drama.slug}${drama.source ? `?source=${drama.source}` : ''}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={drama.img ? `/api/image-proxy?url=${encodeURIComponent(drama.img)}` : undefined}
@@ -1685,7 +1697,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   </div>
                 </Link>
                 <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                  <Link href={`/watch/drama/${drama.slug}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-rose-400 transition-colors">
+                  <Link href={`/watch/drama/${drama.slug}${drama.source ? `?source=${drama.source}` : ''}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-rose-400 transition-colors">
                     {drama.title}
                   </Link>
                   {drama.ep && (

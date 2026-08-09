@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as https from 'https';
 
 // Ignore TLS errors for grey-market streaming sites (expired certs)
+if (typeof process !== 'undefined') {
+  const originalEmitWarning = process.emitWarning;
+  process.emitWarning = function (warning, ...args) {
+    const message = typeof warning === 'string' ? warning : warning?.message || '';
+    if (message.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
+      return;
+    }
+    return originalEmitWarning.apply(process, [warning, ...args] as any);
+  };
+}
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 async function resolveDns(domain: string): Promise<string | null> {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing } from '@/lib/stream-scraper';
+import { getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing, getAnimeXinOngoing } from '@/lib/stream-scraper';
 
 export async function GET(req: NextRequest) {
   try {
@@ -9,6 +9,9 @@ export async function GET(req: NextRequest) {
     let results = [];
     if (type === 'donghua') {
       results = await getAnichinOngoing().catch(() => []);
+    } else if (type === 'animexin') {
+      // AnimeXin as alternative donghua source
+      results = await getAnimeXinOngoing().catch(() => []);
     } else if (type === 'drama') {
       const rawDrama = await getJuraganfilmOngoing().catch(() => []);
       results = rawDrama.map(item => ({ ...item, type: 'drama' as const }));

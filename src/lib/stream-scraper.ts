@@ -2,6 +2,16 @@ import * as https from 'https';
 import * as cheerio from 'cheerio';
 
 // Ignore TLS errors for grey-market streaming sites (expired certs)
+if (typeof process !== 'undefined') {
+  const originalEmitWarning = process.emitWarning;
+  process.emitWarning = function (warning, ...args) {
+    const message = typeof warning === 'string' ? warning : warning?.message || '';
+    if (message.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
+      return;
+    }
+    return originalEmitWarning.apply(process, [warning, ...args] as any);
+  };
+}
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const OTAKUDESU_BASE = 'https://otakudesu.blog';
@@ -19,6 +29,7 @@ let otakudesuOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 let anichinOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 let juraganfilmOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 let jikanOngoingCache: CacheEntry<AnimeCard[]> | null = null;
+let animexinOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 
 // Thread-safe in-memory cache for details, catalog, searches, and episodes
 const globalScraperCache = new Map<string, CacheEntry<any>>();
@@ -183,6 +194,7 @@ export interface AnimeCard {
   ep?: string;
   day?: string;
   type: 'anime' | 'donghua' | 'drama';
+  source?: string;
 }
 
 export interface AnimeDetail {
@@ -325,7 +337,7 @@ export async function getOtakudesuOngoing(): Promise<AnimeCard[]> {
       const slug = extractSlug(url);
 
       if (title && slug) {
-        ongoing.push({ title, slug, url: url || '', img, ep, day, type: 'anime' });
+        ongoing.push({ title, slug, url: url || '', img, ep, day, type: 'anime', source: 'otakudesu' });
       }
     });
 
@@ -490,7 +502,7 @@ export async function getOtakudesuSearch(query: string): Promise<AnimeCard[]> {
       const slug = extractSlug(url);
 
       if (title && slug) {
-        results.push({ title, slug, url: url || '', img, type: 'anime' });
+        results.push({ title, slug, url: url || '', img, type: 'anime', source: 'otakudesu' });
       }
     });
 
@@ -560,7 +572,8 @@ export async function getAnichinOngoing(): Promise<AnimeCard[]> {
           url: `${ANICHIN_BASE}/donghua/${seriesSlug}/`,
           img: normalizeUrl(img, ANICHIN_BASE),
           ep: ep || 'Release',
-          type: 'donghua'
+          type: 'donghua',
+          source: 'anichin'
         });
       }
     });
@@ -791,7 +804,8 @@ export async function getAnichinSearch(query: string): Promise<AnimeCard[]> {
           slug,
           url: normalizeUrl(url, ANICHIN_BASE),
           img: normalizeUrl(img, ANICHIN_BASE),
-          type: 'donghua'
+          type: 'donghua',
+          source: 'anichin'
         });
       }
     });
@@ -847,7 +861,8 @@ export async function getJuraganfilmOngoing(): Promise<AnimeCard[]> {
             url,
             img,
             ep: epText,
-            type: 'donghua' // will be mapped dynamically or treated generically as 'drama' in frontend
+            type: 'donghua', // will be mapped dynamically or treated generically as 'drama' in frontend
+            source: 'juraganfilm'
           });
         }
       });
@@ -1028,7 +1043,8 @@ export async function getJuraganfilmSearch(query: string): Promise<AnimeCard[]> 
           slug,
           url,
           img,
-          type: 'donghua' // will resolve as 'drama' on search client mapping
+          type: 'donghua', // will resolve as 'drama' on search client mapping
+          source: 'juraganfilm'
         });
       }
     });
@@ -1168,7 +1184,7 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
       const slug = extractSlug(href);
 
       if (title && slug) {
-        ongoing.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime' });
+        ongoing.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime', source: 'samehadaku' });
       }
     });
 
@@ -1190,7 +1206,7 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
       const slug = extractSlug(href);
 
       if (title && slug) {
-        homeList.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime' });
+        homeList.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime', source: 'samehadaku' });
       }
     });
 
@@ -1358,7 +1374,8 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
           url: normalizeUrl(url, SAMEHADAKU_BASE),
           img: normalizeUrl(img, SAMEHADAKU_BASE),
           ep,
-          type: 'anime'
+          type: 'anime',
+          source: 'samehadaku'
         });
       }
     });
@@ -1377,35 +1394,105 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
 
 const ANIMEXIN_BASE = 'https://animexin.dev';
 
+export async function getAnimeXinOngoing(): Promise<AnimeCard[]> {
+  const now = Date.now();
+  if (animexinOngoingCache && (now - animexinOngoingCache.timestamp) < CACHE_TTL_MS) {
+    return animexinOngoingCache.data;
+  }
+
+  try {
+    // Fetch recently updated donghua list
+    const html = await fetchHtml(`${ANIMEXIN_BASE}/anime/?status=ongoing&type=&order=update`);
+    const $ = cheerio.load(html);
+    const ongoing: AnimeCard[] = [];
+
+    // Structure: article.bs > div.bsx > a[href][title] > div.limit > img, div.tt (text + h2)
+    $('.listupd article.bs, article.bs').each((i, el) => {
+      const a = $(el).find('a').first();
+      const href = a.attr('href') || '';
+      const title = a.attr('title') || '';
+
+      // Get clean title from .tt — it contains text node + h2 child; take text node only
+      const ttNode = $(el).find('.tt');
+      const cleanTitle = title || ttNode.clone().children().remove().end().text().trim() || ttNode.text().split('\t')[0].trim();
+
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const ep = $(el).find('.epx').text().trim();
+      const slug = extractSlug(href);
+
+      if (cleanTitle && slug) {
+        ongoing.push({
+          title: cleanTitle,
+          slug,
+          url: href,
+          img: normalizeUrl(img, ANIMEXIN_BASE),
+          ep: ep || 'Ongoing',
+          type: 'donghua',
+          source: 'animexin'
+        });
+      }
+    });
+
+    if (ongoing.length > 0) {
+      animexinOngoingCache = { data: ongoing, timestamp: now };
+    }
+    return ongoing;
+  } catch (err) {
+    console.error('Error in getAnimeXinOngoing:', err);
+    return animexinOngoingCache ? animexinOngoingCache.data : [];
+  }
+}
+
 export async function getAnimeXinDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `animexin:detail:${slug}`;
   const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
   if (cached) return cached;
 
   try {
-    const url = `${ANIMEXIN_BASE}/${slug}/`;
-    const html = await fetchHtml(url);
-    const $ = cheerio.load(html);
+    let html = '';
+    let $ = cheerio.load('');
+    let epCount = 0;
 
-    const title = $('.info-content h1, .entry-title').text().trim();
-    const rawImg = $('.thumb img').attr('src') || $('.info-content img').attr('src') || '';
+    // Try format 1: /{slug}/ (most common on animexin.dev)
+    try {
+      const url = `${ANIMEXIN_BASE}/${slug}/`;
+      html = await fetchHtml(url);
+      $ = cheerio.load(html);
+      epCount = $('.eplister ul li').length;
+    } catch {}
+
+    // Try format 2: /anime/{slug}/
+    if (epCount === 0) {
+      try {
+        const url = `${ANIMEXIN_BASE}/anime/${slug}/`;
+        html = await fetchHtml(url);
+        $ = cheerio.load(html);
+        epCount = $('.eplister ul li').length;
+      } catch {}
+    }
+
+    // Animexin detail page: title in h1.entry-title, img in .thumb img, desc in .desc
+    const title = $('h1.entry-title, .bigcontent .infox h1').text().trim() || $('h1').first().text().trim();
+    const rawImg = $('.thumb img').attr('src') || $('.bigcontent img').attr('src') || '';
     const img = normalizeUrl(rawImg, ANIMEXIN_BASE);
-    const synopsis = $('.entry-content p, .sinopse p').text().trim() || $('.entry-content, .desc').text().trim();
+    const synopsis = $('.desc').text().trim() || $('.entry-content p').first().text().trim() || '';
 
     const details: string[] = [];
-    $('.info-content .spe span, .spe span').each((i, el) => {
+    $('.spe span').each((i, el) => {
       details.push($(el).text().trim());
     });
 
     const episodes: EpisodeLink[] = [];
     $('.eplister ul li').each((i, el) => {
+      const epNum = $(el).find('.epl-num').text().trim();
       const epTitle = $(el).find('.epl-title').text().trim() || $(el).find('a').text().trim();
       const epUrl = $(el).find('a').attr('href') || '';
       const epDate = $(el).find('.epl-date').text().trim();
 
       const epSlug = extractSlug(epUrl);
-      if (epTitle && epSlug) {
-        episodes.push({ title: epTitle, slug: epSlug, date: epDate });
+      const displayTitle = epTitle || (epNum ? `Episode ${epNum}` : '');
+      if (displayTitle && epSlug) {
+        episodes.push({ title: displayTitle, slug: epSlug, date: epDate });
       }
     });
 
@@ -1428,7 +1515,7 @@ export async function getAnimeXinEpisode(slug: string) {
     const html = await fetchHtml(url);
     const $ = cheerio.load(html);
 
-    const title = $('.entry-title, h1').text().trim();
+    const title = $('h1.entry-title, h1').first().text().trim();
     const mirrors: any[] = [];
 
     // AnimeXin uses select.mirror containing base64 encoded iframes
@@ -1447,7 +1534,7 @@ export async function getAnimeXinEpisode(slug: string) {
     $('select.mirror option').each((i, el) => {
       const val = $(el).attr('value');
       const text = $(el).text().trim();
-      if (!val) return;
+      if (!val || text.toLowerCase().includes('select')) return;
 
       mirrorPromises.push((async () => {
         try {
@@ -1493,21 +1580,27 @@ export async function getAnimeXinSearch(query: string): Promise<AnimeCard[]> {
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
-    $('.listupd .bs, .bs').each((i, el) => {
-      const fullTitle = $(el).find('h4, .tt, .title').text().trim();
-      const url = $(el).find('a').attr('href');
-      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+    // Structure: article.bs > div.bsx > a[href][title] > img, div.tt
+    $('article.bs').each((i, el) => {
+      const a = $(el).find('a').first();
+      const href = a.attr('href') || '';
+      const title = a.attr('title') || '';
 
-      const cleanTitle = fullTitle.split('\t')[0].trim();
-      const slug = extractSlug(url);
+      // .tt contains text node + h2 — grab the a[title] which is already clean
+      const ttNode = $(el).find('.tt');
+      const cleanTitle = title || ttNode.clone().children().remove().end().text().trim() || ttNode.text().split('\t')[0].trim();
+
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const slug = extractSlug(href);
 
       if (cleanTitle && slug) {
         results.push({
           title: cleanTitle,
           slug,
-          url: normalizeUrl(url, ANIMEXIN_BASE),
+          url: href,
           img: normalizeUrl(img, ANIMEXIN_BASE),
-          type: 'donghua'
+          type: 'donghua',
+          source: 'animexin'
         });
       }
     });
@@ -1658,7 +1751,8 @@ export async function getDonghuastreamSearch(query: string): Promise<AnimeCard[]
           slug,
           url: normalizeUrl(url, DONGHUASTREAM_BASE),
           img: normalizeUrl(img, DONGHUASTREAM_BASE),
-          type: 'donghua'
+          type: 'donghua',
+          source: 'donghuastream'
         });
       }
     });

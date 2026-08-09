@@ -43,6 +43,7 @@ interface WatchClientProps {
   initialData: AnimeDetail;
   type: string;
   slug: string;
+  initialSource?: string;
 }
 
 function getCleanEpisodeNumber(title: string, fallbackNum: number): string {
@@ -70,10 +71,14 @@ function getCleanEpisodeNumber(title: string, fallbackNum: number): string {
   return `Ep ${fallbackNum}`;
 }
 
-export default function WatchClient({ initialData, type, slug }: WatchClientProps) {
+export default function WatchClient({ initialData, type, slug, initialSource }: WatchClientProps) {
   const { theme, setTheme } = useTheme();
   const [data, setData] = useState<AnimeDetail>(initialData);
-  const [activeSource, setActiveSource] = useState<'utama' | 'cadangan' | 'alternatif'>('utama');
+  const [activeSource, setActiveSource] = useState<'utama' | 'cadangan' | 'alternatif'>(() => {
+    if (initialSource === 'animexin' || initialSource === 'samehadaku') return 'cadangan';
+    if (initialSource === 'donghuastream') return 'alternatif';
+    return 'utama';
+  });
   const [activeEpisode, setActiveEpisode] = useState<EpisodeLink | null>(null);
   
   // Player state
@@ -200,11 +205,34 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
     return () => clearTimeout(timer);
   }, [slug, type, activeProfile]);
 
-  // Load profiles active profile initially
+  // Load profiles active profile initially and handle preferred source caching/restoration
   useEffect(() => {
     const profile = localStorage.getItem('aylin_active_profile') || 'Utama';
     setActiveProfile(profile);
-  }, []);
+
+    // Sync initialSource to preferredSource in localStorage
+    if (initialSource === 'animexin' || initialSource === 'samehadaku') {
+      localStorage.setItem('aylin_preferred_source', 'cadangan');
+    } else if (initialSource === 'donghuastream') {
+      localStorage.setItem('aylin_preferred_source', 'alternatif');
+    } else if (initialSource === 'anichin' || initialSource === 'otakudesu') {
+      localStorage.setItem('aylin_preferred_source', 'utama');
+    }
+
+    // Auto-switch to preferred source if no source is specified in the URL query parameter
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlSource = urlParams.get('source');
+      if (!urlSource) {
+        const preferred = localStorage.getItem('aylin_preferred_source');
+        if (preferred === 'cadangan' || preferred === 'alternatif') {
+          setTimeout(() => {
+            handleSourceChange(preferred as 'cadangan' | 'alternatif');
+          }, 150);
+        }
+      }
+    }
+  }, [initialSource]);
 
   // Fetch ongoing recommendations on mount
   useEffect(() => {
@@ -213,8 +241,15 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         const res = await fetch(`/api/ongoing?type=${type}`);
         const json = await res.json();
         if (json.success) {
-          // Filter out the current series to avoid recommending what they are already watching
-          const filtered = (json.results || []).filter((item: any) => item.slug !== slug);
+          // Filter out the current series and duplicates to avoid key collisions
+          const seen = new Set<string>();
+          const filtered = (json.results || []).filter((item: any) => {
+            if (!item.slug || item.slug === slug || seen.has(item.slug)) {
+              return false;
+            }
+            seen.add(item.slug);
+            return true;
+          });
           setRecommendations(filtered);
         }
       } catch (e) {
@@ -431,12 +466,12 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
   const wrapWithProxy = (src: string): string => {
     if (!src) return src;
     try {
-      const parsed = new URL(src);
+      const normalizedSrc = src.startsWith('//') ? `https:${src}` : src;
+      const parsed = new URL(normalizedSrc);
       const hostname = parsed.hostname;
       // Public video hosts that do NOT block by Referer — proxy not needed
       const publicHosts = [
         'ok.ru', 'odnoklassniki.ru',
-        'dailymotion.com', 'dai.ly',
         'youtube.com', 'youtu.be',
         'drive.google.com', 'docs.google.com',
         'streamtape.com', 'streamtape.net',
@@ -444,6 +479,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         'filemoon.sx', 'filemoon.in',
         'fembed.com', 'fembed.net',
         'mega.nz',
+        'dailymotion.com', 'geo.dailymotion.com', 'dmcdn.net',
       ];
       const needsProxy = !publicHosts.some(host =>
         hostname === host || hostname.endsWith('.' + host)
@@ -459,9 +495,9 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         } else {
           refererParam = 'https://otakudesu.cloud';
         }
-        return `/api/stream-proxy?url=${encodeURIComponent(src)}&referer=${encodeURIComponent(refererParam)}`;
+        return `/api/stream-proxy?url=${encodeURIComponent(normalizedSrc)}&referer=${encodeURIComponent(refererParam)}`;
       }
-      return src;
+      return normalizedSrc;
     } catch {
       return src;
     }
@@ -470,42 +506,61 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
   // Switch source dynamically between Utama and Cadangan (AnimeXin/Samehadaku)
   const handleSourceChange = async (source: 'utama' | 'cadangan' | 'alternatif') => {
     setActiveSource(source);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('aylin_preferred_source', source);
+    }
     setEpisodeLoading(true);
     setMirrors([]);
     setActiveMirror(null);
     setPlayerSrc('');
     setError('');
 
-    if (source === 'utama') {
+    // Determine the target provider name
+    let provider = '';
+    if (source === 'cadangan') {
+      provider = type === 'donghua' ? 'animexin' : 'samehadaku';
+    } else if (source === 'alternatif') {
+      provider = type === 'donghua' ? 'donghuastream' : '';
+    }
+
+    // Update query parameter dynamically in the URL
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        if (provider) {
+          url.searchParams.set('source', provider);
+        } else {
+          url.searchParams.delete('source');
+        }
+        window.history.replaceState({ ...window.history.state, as: url.pathname + url.search, url: url.pathname + url.search }, '', url.toString());
+      } catch (e) {}
+    }
+
+    const initialSourceType = 
+      (initialSource === 'animexin' || initialSource === 'samehadaku') ? 'cadangan' :
+      (initialSource === 'donghuastream') ? 'alternatif' : 'utama';
+
+    if (source === initialSourceType) {
       setData(initialData);
-      // Auto load default episode from utama
       if (initialData.episodes && initialData.episodes.length > 0) {
         const defaultEp = type === 'drama' 
           ? initialData.episodes[0] 
           : initialData.episodes[initialData.episodes.length - 1];
         loadEpisode(defaultEp);
       }
+      setEpisodeLoading(false);
       return;
     }
 
     try {
-      let provider = '';
-      if (source === 'cadangan') {
-        provider = type === 'donghua' ? 'animexin' : 'samehadaku';
-      } else if (source === 'alternatif') {
-        provider = type === 'donghua' ? 'donghuastream' : '';
-      }
+      let targetSlug = slug;
       
-      if (!provider) {
-        throw new Error('Sumber alternatif belum didukung untuk kategori ini.');
-      }
-      
-      // Step 1: Search for this series title on the backup provider
-      const searchRes = await fetch(`/api/search?q=${encodeURIComponent(initialData.title)}&source=${provider}`);
+      // Fetch matching slug on target provider by searching its title
+      const searchRes = await fetch(`/api/search?q=${encodeURIComponent(initialData.title)}${provider ? `&source=${provider}` : ''}`);
       const searchJson = await searchRes.json();
       
       if (!searchJson.success || !searchJson.results || searchJson.results.length === 0) {
-        throw new Error(`Seri "${initialData.title}" tidak ditemukan di sumber cadangan.`);
+        throw new Error(`Seri "${initialData.title}" tidak ditemukan di sumber tujuan.`);
       }
 
       // Find exact title match, or default to first result
@@ -513,14 +568,14 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         r.title.toLowerCase().replace(/sub\s+indo/i, '').trim() === initialData.title.toLowerCase().trim()
       ) || searchJson.results[0];
       
-      const alternativeSlug = bestMatch.slug;
+      targetSlug = bestMatch.slug;
 
-      // Step 2: Fetch details of this alternative series slug
-      const detailRes = await fetch(`/api/anime/${alternativeSlug}?type=${type}&source=${provider}`);
+      // Fetch details of this alternative series slug
+      const detailRes = await fetch(`/api/anime/${targetSlug}?type=${type}${provider ? `&source=${provider}` : ''}`);
       const detailJson = await detailRes.json();
 
       if (!detailJson.success || !detailJson.data) {
-        throw new Error('Gagal mengambil rincian seri dari sumber cadangan.');
+        throw new Error('Gagal mengambil rincian seri dari sumber tujuan.');
       }
 
       const updatedData: AnimeDetail = {
@@ -531,9 +586,8 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
 
       setData(updatedData);
 
-      // Step 3: Auto-select and load the closest matching episode
+      // Auto-select and load the closest matching episode
       if (updatedData.episodes && updatedData.episodes.length > 0) {
-        // Find episode matching the number of the last active episode, or default to first/last
         let targetEp = null;
         if (activeEpisode) {
           const actEpNumMatch = activeEpisode.title.match(/Episode\s+(\d+)/i) || activeEpisode.title.match(/Ep\s+(\d+)/i);
@@ -555,12 +609,11 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
       }
 
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Gagal menghubungkan ke sumber cadangan.';
+      const msg = err instanceof Error ? err.message : 'Gagal menghubungkan ke sumber tujuan.';
       setError(msg);
-      setActiveSource('utama');
+      setActiveSource(initialSourceType);
       setData(initialData);
       
-      // Fallback load default episode from utama
       if (initialData.episodes && initialData.episodes.length > 0) {
         const defaultEp = type === 'drama' 
           ? initialData.episodes[0] 
@@ -580,6 +633,12 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
     setActiveMirror(null);
     setPlayerSrc('');
     setError('');
+
+    const provider = activeSource === 'cadangan' 
+      ? (type === 'donghua' ? 'animexin' : 'samehadaku') 
+      : activeSource === 'alternatif'
+        ? (type === 'donghua' ? 'donghuastream' : '')
+        : '';
 
     // Update query parameter dynamically in the URL
     if (typeof window !== 'undefined') {
@@ -619,7 +678,8 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         type: type,
         lastEpTitle: episode.title,
         lastEpSlug: episode.slug,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        source: provider || undefined
       });
       
       // Limit to 12 items
@@ -658,11 +718,6 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
     }
 
     try {
-      const provider = activeSource === 'cadangan' 
-        ? (type === 'donghua' ? 'animexin' : 'samehadaku') 
-        : activeSource === 'alternatif'
-          ? (type === 'donghua' ? 'donghuastream' : '')
-          : '';
       const res = await fetch(`/api/episode?type=${type}&slug=${episode.slug}${provider ? `&source=${provider}` : ''}`);
       const json = await res.json();
       
@@ -692,8 +747,8 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         
         setActiveMirror(selectedMirror);
         
-        if (type === 'donghua' || type === 'drama') {
-          // Anichin and Juraganfilm use direct iframe sources — route via proxy to bypass hotlink protection
+        const needsResolve = type === 'anime' && activeSource === 'utama';
+        if (!needsResolve) {
           if (selectedMirror.payload.src) {
             setPlayerSrc(wrapWithProxy(selectedMirror.payload.src));
           }
@@ -742,12 +797,71 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
     setActiveMirror(mirror);
     savePreferredMirror(mirror.playerText);
     
-    if (type === 'donghua' || type === 'drama') {
+    const needsResolve = type === 'anime' && activeSource === 'utama';
+    if (!needsResolve) {
       if (mirror.payload.src) {
         setPlayerSrc(wrapWithProxy(mirror.payload.src));
       }
     } else {
       await resolveMirrorLink(activeEpisode.slug, mirror);
+    }
+  };
+
+  // Smart Skip Intro Handler that attempts automatic seek on same-origin (proxied) players
+  const handleSkipIntro = () => {
+    setElapsedTime(90);
+    
+    let autoSkipped = false;
+    try {
+      const iframe = document.querySelector('iframe');
+      if (iframe) {
+        // Safe check to see if we can access the iframe's content document
+        const isDocumentAccessible = (doc: Document | null) => {
+          if (!doc) return false;
+          try {
+            const _ = doc.location.href;
+            return true;
+          } catch {
+            return false;
+          }
+        };
+
+        const doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
+        if (doc && isDocumentAccessible(doc)) {
+          let video = doc.querySelector('video');
+          
+          if (!video) {
+            // Traverse nested same-origin iframes
+            const nestedIframes = doc.querySelectorAll('iframe');
+            for (let i = 0; i < nestedIframes.length; i++) {
+              try {
+                const nestedDoc = nestedIframes[i].contentDocument || nestedIframes[i].contentWindow?.document;
+                if (nestedDoc && isDocumentAccessible(nestedDoc)) {
+                  const nestedVideo = nestedDoc.querySelector('video');
+                  if (nestedVideo) {
+                    video = nestedVideo;
+                    break;
+                  }
+                }
+              } catch {}
+            }
+          }
+
+          if (video) {
+            video.currentTime = 90;
+            autoSkipped = true;
+            try {
+              video.play().catch(() => {});
+            } catch {}
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to automatically skip intro:", e);
+    }
+
+    if (!autoSkipped) {
+      alert("Petunjuk Lewati Intro:\n\nKarena batasan keamanan browser (Cross-Origin), pemutar video eksternal tidak dapat melompati video secara otomatis.\n\nSilakan klik atau geser tombol durasi di bagian bawah pemutar video ke menit 1:30 untuk melewati intro.");
     }
   };
 
@@ -818,7 +932,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
       )}
 
       {/* Header Bar */}
-      <nav className={`w-full glass-nav px-4 sm:px-8 py-3 flex items-center justify-between gap-4 z-50 ${cinemaMode ? 'relative' : 'sticky top-0'}`}>
+      <nav className={`w-full glass-nav px-4 sm:px-8 py-3 flex items-center justify-between gap-4 z-[100] ${cinemaMode ? 'relative' : 'sticky top-0'}`}>
         <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
           <Link href="/" className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors">
             <ArrowLeft size={18} />
@@ -849,7 +963,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
 
           {/* Search Result Dropdown Overlay */}
           {searchOpen && (
-            <div className="absolute left-0 right-0 mt-3 bg-slate-950/95 border border-slate-905 rounded-2xl p-4 shadow-2xl z-50 backdrop-blur-md max-h-[380px] overflow-y-auto animate-fade-in">
+            <div className="absolute left-0 right-0 mt-3 bg-slate-950/95 border border-slate-905 rounded-2xl p-4 shadow-2xl z-[100] backdrop-blur-md max-h-[380px] overflow-y-auto animate-fade-in">
               <div className="flex items-center justify-between border-b border-slate-805/80 pb-2 mb-2">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hasil Pencarian</span>
                 <span className="text-[10px] text-slate-500">{searchResults.length} ditemukan</span>
@@ -869,7 +983,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
                   {searchResults.map((item) => (
                     <Link
                       key={`${item.type}-${item.slug}`}
-                      href={`/watch/${item.type}/${item.slug}`}
+                      href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
                       onClick={() => clearSearch()}
                       className="flex items-center gap-3 p-1.5 hover:bg-white/5 rounded-xl transition-colors group"
                     >
@@ -921,7 +1035,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
             </button>
 
             {isProfileOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-slate-950/95 border border-slate-900 rounded-2xl p-2.5 shadow-2xl flex flex-col gap-2 z-50 backdrop-blur-md animate-fade-in">
+              <div className="absolute right-0 mt-2 w-52 bg-slate-950/95 border border-slate-900 rounded-2xl p-2.5 shadow-2xl flex flex-col gap-2 z-[100] backdrop-blur-md animate-fade-in">
                 <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider px-2">Ganti Profil</span>
                 <div className="flex flex-col gap-1 max-h-40 overflow-y-auto scrollbar-thin">
                   {profiles.map(p => (
@@ -1029,7 +1143,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
       </nav>
 
       {/* Main Watch Page Body */}
-      <div className={`w-full mx-auto px-4 sm:px-8 py-6 flex flex-col gap-6 z-50 ${theatreMode ? '' : 'max-w-7xl'}`}>
+      <div className={`w-full mx-auto px-4 sm:px-8 py-6 flex flex-col gap-6 z-10 ${theatreMode ? '' : 'max-w-7xl'}`}>
         
         {/* Layout Split container */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1074,10 +1188,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
                   {/* Floating Skip Intro Button */}
                   {elapsedTime < 90 && !episodeLoading && !playerLoading && !error && (
                     <button
-                      onClick={() => {
-                        setElapsedTime(90);
-                        alert("Petunjuk Lewati Intro:\n\nKarena batasan keamanan browser (Cross-Origin), pemutar video eksternal tidak dapat melompati video secara otomatis.\n\nSilakan klik atau geser tombol durasi di bagian bawah pemutar video ke menit 1:30 untuk melewati intro.");
-                      }}
+                      onClick={handleSkipIntro}
                       className="absolute bottom-4 left-4 z-30 bg-violet-600/90 border border-violet-500 hover:bg-violet-500 text-white font-extrabold px-4 py-2 rounded-xl shadow-2xl backdrop-blur-md text-xs transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer animate-pulse"
                       title="Petunjuk cara melewati intro video"
                     >
@@ -1440,7 +1551,7 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
               {recommendations.map((item) => (
                 <Link
                   key={`rec-${item.slug}`}
-                  href={`/watch/${type}/${item.slug}`}
+                  href={`/watch/${type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
                   className="flex flex-col gap-2 group cursor-pointer"
                 >
                   <div className="relative aspect-[3/4] w-full rounded-2xl overflow-hidden bg-slate-900 shadow border border-white/5">

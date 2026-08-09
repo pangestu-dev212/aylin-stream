@@ -3,6 +3,16 @@ import * as https from 'https';
 import * as http from 'http';
 
 // Ignore TLS errors for streaming sites with self-signed/expired certs
+if (typeof process !== 'undefined') {
+  const originalEmitWarning = process.emitWarning;
+  process.emitWarning = function (warning, ...args) {
+    const message = typeof warning === 'string' ? warning : warning?.message || '';
+    if (message.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
+      return;
+    }
+    return originalEmitWarning.apply(process, [warning, ...args] as any);
+  };
+}
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 /**

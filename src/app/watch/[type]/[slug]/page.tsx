@@ -1,5 +1,12 @@
 import { Metadata } from 'next';
-import { getOtakudesuDetail, getAnichinDetail, getJuraganfilmDetail } from '@/lib/stream-scraper';
+import { 
+  getOtakudesuDetail, 
+  getAnichinDetail, 
+  getJuraganfilmDetail,
+  getAnimeXinDetail,
+  getSamehadakuDetail,
+  getDonghuastreamDetail
+} from '@/lib/stream-scraper';
 import WatchClient from './WatchClient';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
@@ -11,15 +18,26 @@ interface PageProps {
     type: string;
     slug: string;
   }>;
+  searchParams: Promise<{
+    source?: string;
+  }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const { type, slug } = await params;
-  const data = type === 'drama'
-    ? await getJuraganfilmDetail(slug)
-    : type === 'donghua' 
-      ? await getAnichinDetail(slug) 
-      : await getOtakudesuDetail(slug);
+  const { source } = await searchParams;
+
+  const data = source === 'animexin'
+    ? await getAnimeXinDetail(slug)
+    : source === 'samehadaku'
+      ? await getSamehadakuDetail(slug)
+      : source === 'donghuastream'
+        ? await getDonghuastreamDetail(slug)
+        : type === 'drama'
+          ? await getJuraganfilmDetail(slug)
+          : type === 'donghua' 
+            ? await getAnichinDetail(slug) 
+            : await getOtakudesuDetail(slug);
      
   return {
     title: data ? `Nonton ${data.title} Subtitle Indonesia - Aylin Stream` : 'Nonton Anime & Donghua - Aylin Stream',
@@ -27,15 +45,22 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function WatchPage({ params }: PageProps) {
+export default async function WatchPage({ params, searchParams }: PageProps) {
   const { type, slug } = await params;
+  const { source } = await searchParams;
   
-  // Fetch details based on type
-  const data = type === 'drama'
-    ? await getJuraganfilmDetail(slug)
-    : type === 'donghua' 
-      ? await getAnichinDetail(slug) 
-      : await getOtakudesuDetail(slug);
+  // Fetch details based on type or source override
+  const data = source === 'animexin'
+    ? await getAnimeXinDetail(slug)
+    : source === 'samehadaku'
+      ? await getSamehadakuDetail(slug)
+      : source === 'donghuastream'
+        ? await getDonghuastreamDetail(slug)
+        : type === 'drama'
+          ? await getJuraganfilmDetail(slug)
+          : type === 'donghua' 
+            ? await getAnichinDetail(slug) 
+            : await getOtakudesuDetail(slug);
 
   if (!data) {
     return (
@@ -49,13 +74,15 @@ export default async function WatchPage({ params }: PageProps) {
   }
 
   // Ensure type property matches the actual page parameter
-  const parsedData = { ...data, type: type as 'anime' | 'donghua' };
+  const parsedData = { ...data, type: type as 'anime' | 'donghua' | 'drama' };
 
   return (
     <WatchClient 
       initialData={parsedData} 
       type={type} 
       slug={slug} 
+      initialSource={source}
     />
   );
 }
+
