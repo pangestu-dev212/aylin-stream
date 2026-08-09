@@ -480,10 +480,11 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         'fembed.com', 'fembed.net',
         'mega.nz',
         'dailymotion.com', 'geo.dailymotion.com', 'dmcdn.net',
+        'gdriveplayer.to', 'gdriveplayer.me', 'gdriveplayer.us',
       ];
       const needsProxy = !publicHosts.some(host =>
         hostname === host || hostname.endsWith('.' + host)
-      );
+      ) && !hostname.includes('gdriveplayer');
       if (needsProxy) {
         let refererParam = '';
         if (activeSource === 'cadangan') {
