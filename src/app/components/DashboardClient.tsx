@@ -4,10 +4,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Play, Search, Star, Film, Tv, Clock, X, ArrowUpRight,
-  Bell, BellOff, User, Plus, Trash2, ChevronDown, Palette
+  Bell, BellOff, User, Plus, Trash2, ChevronDown, Palette,
+  RefreshCw, Copy, Check, Link2
 } from 'lucide-react';
 import { AnimeCard } from '@/lib/stream-scraper';
 import { useTheme, THEMES } from '../context/ThemeContext';
+import { isSupabaseActive } from '@/lib/supabaseClient';
+import {
+  getDeviceId,
+  fetchProfilesFromCloud,
+  saveProfileToCloud,
+  deleteProfileFromCloud,
+  fetchBookmarksFromCloud,
+  removeBookmarkFromCloud
+} from '@/lib/supabaseSync';
 
 interface DashboardClientProps {
   initialAnime: AnimeCard[];
@@ -401,12 +411,18 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   interface Profile {
     name: string;
     color: string;
+    theme?: string;
   }
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfile, setActiveProfile] = useState<string>('Utama');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   const [newProfileColor, setNewProfileColor] = useState('from-violet-500 to-indigo-500');
+
+  const [deviceId, setDeviceId] = useState<string>('');
+  const [syncInput, setSyncInput] = useState<string>('');
+  const [syncSuccess, setSyncSuccess] = useState<boolean>(false);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
 
   // Theme context
   const { theme, setTheme } = useTheme();
@@ -470,23 +486,41 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   useEffect(() => {
     setMounted(true);
     // Load Profiles & Alarms
-    const timer = setTimeout(() => {
-      const savedProfiles = localStorage.getItem('aylin_profiles');
+    const timer = setTimeout(async () => {
+      const devId = getDeviceId();
+      setDeviceId(devId);
+
       let loadedProfiles: Profile[] = [];
-      if (savedProfiles) {
-        try {
-          loadedProfiles = JSON.parse(savedProfiles);
+      if (isSupabaseActive()) {
+        loadedProfiles = await fetchProfilesFromCloud(devId);
+        if (loadedProfiles.length === 0) {
+          await saveProfileToCloud(devId, 'Utama', 'from-violet-500 to-indigo-500');
+          loadedProfiles = [{ name: 'Utama', color: 'from-violet-500 to-indigo-500', theme: 'theme-neon-purple' }];
+        }
+        setProfiles(loadedProfiles);
+      } else {
+        const savedProfiles = localStorage.getItem('aylin_profiles');
+        if (savedProfiles) {
+          try {
+            loadedProfiles = JSON.parse(savedProfiles);
+            setProfiles(loadedProfiles);
+          } catch {}
+        }
+        if (loadedProfiles.length === 0) {
+          loadedProfiles = [{ name: 'Utama', color: 'from-violet-500 to-indigo-500' }];
           setProfiles(loadedProfiles);
-        } catch {}
-      }
-      if (loadedProfiles.length === 0) {
-        const defaultProfiles = [{ name: 'Utama', color: 'from-violet-500 to-indigo-500' }];
-        setProfiles(defaultProfiles);
-        localStorage.setItem('aylin_profiles', JSON.stringify(defaultProfiles));
+          localStorage.setItem('aylin_profiles', JSON.stringify(loadedProfiles));
+        }
       }
 
       const activeProf = localStorage.getItem('aylin_active_profile') || 'Utama';
       setActiveProfile(activeProf);
+
+      // Sync local theme to loaded profile theme if exists
+      const currentProf = loadedProfiles.find(p => p.name === activeProf) || loadedProfiles[0];
+      if (currentProf?.theme) {
+        setTheme(currentProf.theme as any, activeProf);
+      }
 
       const savedAlarms = localStorage.getItem('aylin_release_alarms');
       if (savedAlarms) {
@@ -583,32 +617,45 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const bookKey = getScopedKey('aylin_bookmarks', activeProfile);
-    const savedBookmarks = localStorage.getItem(bookKey);
-    if (savedBookmarks) {
-      try {
-        setBookmarks(JSON.parse(savedBookmarks));
-      } catch {
-        setBookmarks([]);
+    const loadProfileData = async () => {
+      const devId = getDeviceId();
+      
+      // Load Bookmarks
+      if (isSupabaseActive()) {
+        const cloudBookmarks = await fetchBookmarksFromCloud(devId, activeProfile);
+        setBookmarks(cloudBookmarks);
+      } else {
+        const bookKey = getScopedKey('aylin_bookmarks', activeProfile);
+        const savedBookmarks = localStorage.getItem(bookKey);
+        if (savedBookmarks) {
+          try {
+            setBookmarks(JSON.parse(savedBookmarks));
+          } catch {
+            setBookmarks([]);
+          }
+        } else {
+          setBookmarks([]);
+        }
       }
-    } else {
-      setBookmarks([]);
-    }
 
-    const histKey = getScopedKey('aylin_history', activeProfile);
-    const savedHistory = localStorage.getItem(histKey);
-    if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch {
+      // Load History
+      const histKey = getScopedKey('aylin_history', activeProfile);
+      const savedHistory = localStorage.getItem(histKey);
+      if (savedHistory) {
+        try {
+          setHistory(JSON.parse(savedHistory));
+        } catch {
+          setHistory([]);
+        }
+      } else {
         setHistory([]);
       }
-    } else {
-      setHistory([]);
-    }
+    };
+
+    loadProfileData();
   }, [activeProfile]);
 
-  const handleAddProfile = () => {
+  const handleAddProfile = async () => {
     const trimmed = newProfileName.trim();
     if (!trimmed) return;
     if (profiles.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) {
@@ -618,6 +665,12 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
     const updated = [...profiles, { name: trimmed, color: newProfileColor }];
     setProfiles(updated);
     localStorage.setItem('aylin_profiles', JSON.stringify(updated));
+
+    if (isSupabaseActive()) {
+      const devId = getDeviceId();
+      await saveProfileToCloud(devId, trimmed, newProfileColor);
+    }
+
     setNewProfileName('');
     
     // Switch to new profile
@@ -626,7 +679,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
     setIsProfileOpen(false);
   };
 
-  const handleRemoveProfile = (profileName: string) => {
+  const handleRemoveProfile = async (profileName: string) => {
     if (profileName === 'Utama') return;
     if (confirm(`Apakah Anda yakin ingin menghapus profil "${profileName}"? Semua riwayat dan bookmark di profil ini akan terhapus secara permanen.`)) {
       const updated = profiles.filter(p => p.name !== profileName);
@@ -636,6 +689,11 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
       localStorage.removeItem(getScopedKey('aylin_bookmarks', profileName));
       localStorage.removeItem(getScopedKey('aylin_history', profileName));
       localStorage.removeItem(getScopedKey('aylin_watched_episodes', profileName));
+
+      if (isSupabaseActive()) {
+        const devId = getDeviceId();
+        await deleteProfileFromCloud(devId, profileName);
+      }
       
       if (activeProfile === profileName) {
         setActiveProfile('Utama');
@@ -1063,6 +1121,61 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                       className="w-full py-1 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 rounded-lg text-[10px] font-bold text-white shadow-md cursor-pointer flex items-center justify-center gap-1 mt-1"
                     >
                       <Plus size={10} /> Tambah
+                    </button>
+                  </div>
+
+                  {/* Device Sync Section */}
+                  <div className="border-t border-slate-900 my-1"></div>
+                  <div className="flex flex-col gap-1.5 px-1.5 pb-1">
+                    <span className="text-[9px] text-slate-500 font-bold uppercase flex items-center gap-1">
+                      <Link2 size={10} /> Sinkronisasi
+                    </span>
+                    <span className="text-[8px] text-slate-500 leading-normal">
+                      Kode sinkronisasi Anda:
+                    </span>
+                    <div className="flex items-center gap-1 bg-white/5 border border-white/5 rounded-lg py-1 px-1.5 text-[9px] font-bold text-slate-300 font-mono">
+                      <span className="truncate flex-1" title={deviceId}>
+                        {deviceId ? `${deviceId.split('-')[0]}...${deviceId.split('-').pop()}` : 'Generating...'}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (deviceId) {
+                            navigator.clipboard.writeText(deviceId);
+                            setIsCopied(true);
+                            setTimeout(() => setIsCopied(false), 2000);
+                          }
+                        }}
+                        className="text-slate-400 hover:text-white cursor-pointer"
+                        title="Salin Kode Lengkap"
+                      >
+                        {isCopied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
+                      </button>
+                    </div>
+
+                    <input
+                      type="text"
+                      placeholder="Masukkan kode perangkat..."
+                      value={syncInput}
+                      onChange={(e) => setSyncInput(e.target.value)}
+                      className="w-full bg-white/5 border border-white/5 rounded-lg py-1 px-2 text-[8px] font-medium text-slate-300 placeholder-slate-600 outline-none focus:border-violet-500/30 font-mono"
+                    />
+                    <button
+                      onClick={() => {
+                        const trimmed = syncInput.trim();
+                        if (trimmed.length < 20) {
+                          alert("Kode sinkronisasi tidak valid.");
+                          return;
+                        }
+                        localStorage.setItem('aylin_device_id', trimmed);
+                        setSyncSuccess(true);
+                        setTimeout(() => {
+                          setSyncSuccess(false);
+                          window.location.reload();
+                        }, 1000);
+                      }}
+                      className={`w-full py-1 ${syncSuccess ? 'bg-emerald-600' : 'bg-slate-800 hover:bg-slate-700'} rounded-lg text-[9px] font-bold text-white shadow-sm cursor-pointer flex items-center justify-center gap-1 mt-0.5 transition-colors`}
+                    >
+                      {syncSuccess ? 'Berhasil Terhubung!' : 'Hubungkan'}
                     </button>
                   </div>
                 </div>

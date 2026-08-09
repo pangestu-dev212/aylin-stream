@@ -65,6 +65,9 @@ export const THEMES: ThemeOption[] = [
   },
 ];
 
+import { isSupabaseActive } from '@/lib/supabaseClient';
+import { getDeviceId, updateProfileThemeInCloud } from '@/lib/supabaseSync';
+
 interface ThemeContextValue {
   theme: ThemeId;
   setTheme: (id: ThemeId, profile?: string) => void;
@@ -105,7 +108,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [applyTheme]);
 
   const setTheme = useCallback(
-    (id: ThemeId, profile?: string) => {
+    async (id: ThemeId, profile?: string) => {
       applyTheme(id);
       try {
         const activeProfile = profile || localStorage.getItem('aylin_active_profile') || 'Utama';
@@ -113,6 +116,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
           ? 'aylin_theme'
           : `aylin_theme_profile_${activeProfile.replace(/\s+/g, '_')}`;
         localStorage.setItem(storageKey, id);
+
+        if (isSupabaseActive()) {
+          const deviceId = getDeviceId();
+          await updateProfileThemeInCloud(deviceId, activeProfile, id);
+        }
       } catch { /* noop */ }
     },
     [applyTheme]

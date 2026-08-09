@@ -9,6 +9,15 @@ import {
 } from 'lucide-react';
 import { AnimeDetail, EpisodeLink } from '@/lib/stream-scraper';
 import { useTheme } from '@/app/context/ThemeContext';
+import { isSupabaseActive } from '@/lib/supabaseClient';
+import { 
+  getDeviceId, 
+  fetchBookmarksFromCloud, 
+  addBookmarkToCloud, 
+  removeBookmarkFromCloud, 
+  fetchHistoryFromCloud, 
+  addHistoryToCloud 
+} from '@/lib/supabaseSync';
 
 interface MirrorItem {
   quality: string;
@@ -131,38 +140,51 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
 
     setMounted(true);
 
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      const deviceId = getDeviceId();
+
       // Bookmarks
-      const bookKey = getScopedKey('aylin_bookmarks', activeProfile);
-      const saved = localStorage.getItem(bookKey);
-      if (saved) {
-        try {
-          const list: BookmarkedItem[] = JSON.parse(saved);
-          const exists = list.some((item) => item.slug === slug && item.type === type);
-          setIsBookmarked(exists);
-        } catch {
+      if (isSupabaseActive()) {
+        const list = await fetchBookmarksFromCloud(deviceId, activeProfile);
+        const exists = list.some((item) => item.slug === slug && item.type === type);
+        setIsBookmarked(exists);
+      } else {
+        const bookKey = getScopedKey('aylin_bookmarks', activeProfile);
+        const saved = localStorage.getItem(bookKey);
+        if (saved) {
+          try {
+            const list: BookmarkedItem[] = JSON.parse(saved);
+            const exists = list.some((item) => item.slug === slug && item.type === type);
+            setIsBookmarked(exists);
+          } catch {
+            setIsBookmarked(false);
+          }
+        } else {
           setIsBookmarked(false);
         }
-      } else {
-        setIsBookmarked(false);
       }
 
       // Watched episodes
-      const watchedKey = getScopedKey('aylin_watched_episodes', activeProfile);
-      const savedWatched = localStorage.getItem(watchedKey);
-      if (savedWatched) {
-        try {
-          const mapping = JSON.parse(savedWatched);
-          if (mapping[slug]) {
-            setWatchedEpisodes(mapping[slug]);
-          } else {
+      if (isSupabaseActive()) {
+        const list = await fetchHistoryFromCloud(deviceId, activeProfile, slug);
+        setWatchedEpisodes(list);
+      } else {
+        const watchedKey = getScopedKey('aylin_watched_episodes', activeProfile);
+        const savedWatched = localStorage.getItem(watchedKey);
+        if (savedWatched) {
+          try {
+            const mapping = JSON.parse(savedWatched);
+            if (mapping[slug]) {
+              setWatchedEpisodes(mapping[slug]);
+            } else {
+              setWatchedEpisodes([]);
+            }
+          } catch {
             setWatchedEpisodes([]);
           }
-        } catch {
+        } else {
           setWatchedEpisodes([]);
         }
-      } else {
-        setWatchedEpisodes([]);
       }
 
       // Player preferences
@@ -344,23 +366,36 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
   }, [theatreMode, cinemaMode]);
 
   // Toggle bookmark function
-  const toggleBookmark = () => {
+  const toggleBookmark = async () => {
     const profile = localStorage.getItem('aylin_active_profile') || 'Utama';
-    const bookKey = getScopedKey('aylin_bookmarks', profile);
-    const saved = localStorage.getItem(bookKey);
-    let list: BookmarkedItem[] = [];
-    if (saved) {
-      try {
-        list = JSON.parse(saved);
-      } catch {
-        // Ignore JSON error
+    const deviceId = getDeviceId();
+    const willBookmark = !isBookmarked;
+
+    if (isSupabaseActive()) {
+      if (willBookmark) {
+        await addBookmarkToCloud(deviceId, profile, {
+          title: data.title,
+          slug: slug,
+          img: data.img,
+          type: type as 'anime' | 'donghua' | 'drama',
+          url: typeof window !== 'undefined' ? window.location.href : ''
+        });
+      } else {
+        await removeBookmarkFromCloud(deviceId, profile, slug);
       }
     }
 
-    if (isBookmarked) {
-      list = list.filter((item) => !(item.slug === slug && item.type === type));
-      setIsBookmarked(false);
-    } else {
+    // LocalStorage Mirror Sync for resilient fallback
+    const bookKey = getScopedKey('aylin_bookmarks', profile);
+    const saved = localStorage.getItem(bookKey);
+    let list: any[] = [];
+    if (saved) {
+      try {
+        list = JSON.parse(saved);
+      } catch {}
+    }
+
+    if (willBookmark) {
       list.push({
         title: data.title,
         slug: slug,
@@ -368,9 +403,11 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
         type: type,
         ep: data.episodes[0]?.title || 'Release'
       });
-      setIsBookmarked(true);
+    } else {
+      list = list.filter((item) => !(item.slug === slug && item.type === type));
     }
     localStorage.setItem(bookKey, JSON.stringify(list));
+    setIsBookmarked(willBookmark);
   };
 
   // Helper to save preferred mirror to preferences
@@ -611,6 +648,11 @@ export default function WatchClient({ initialData, type, slug }: WatchClientProp
       }
       localStorage.setItem(watchedKey, JSON.stringify(watchedMap));
       setWatchedEpisodes(watchedMap[slug]);
+
+      if (isSupabaseActive()) {
+        const deviceId = getDeviceId();
+        await addHistoryToCloud(deviceId, profile, slug, episode.slug);
+      }
     } catch (e) {
       console.error("Failed to save watched episodes:", e);
     }
