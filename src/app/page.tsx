@@ -1,22 +1,27 @@
-import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing } from '@/lib/stream-scraper';
+import { getJikanOngoingAnime, getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing } from '@/lib/stream-scraper';
 import DashboardClient from './components/DashboardClient';
 
 // Enable layout/page caching to serve static pages and revalidate in the background every 5 minutes (ISR)
 export const revalidate = 300;
 
 export default async function Home() {
-  // Fetch ongoing anime, donghua & drama lists on the server
-  // Use Samehadaku as primary anime source (more accessible from Vercel servers globally)
-  // Fall back to Otakudesu if Samehadaku returns empty
-  const [rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama] = await Promise.all([
+  // Fetch all data sources in parallel
+  // Jikan API (MyAnimeList) = primary anime source, always accessible globally from any server
+  // Samehadaku & Otakudesu = fallbacks (Indonesian sites, may be geo-restricted from Vercel)
+  const [rawJikan, rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama] = await Promise.all([
+    getJikanOngoingAnime().catch(() => []),
     getSamehadakuOngoing().catch(() => []),
     getOtakudesuOngoing().catch(() => []),
     getAnichinOngoing().catch(() => []),
     getJuraganfilmOngoing().catch(() => [])
   ]);
 
-  // Use Samehadaku if it returned data, otherwise fall back to Otakudesu
-  const rawAnime = rawSamehadaku.length > 0 ? rawSamehadaku : rawOtakudesu;
+  // Priority: Jikan (MAL) → Samehadaku → Otakudesu
+  const rawAnime = rawJikan.length > 0
+    ? rawJikan
+    : rawSamehadaku.length > 0
+      ? rawSamehadaku
+      : rawOtakudesu;
 
   // Deduplicate by slug to prevent React duplicate key warning
   const ongoingAnime = [...new Map(rawAnime.map(item => [item.slug, item])).values()];

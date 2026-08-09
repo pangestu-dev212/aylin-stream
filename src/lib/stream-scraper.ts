@@ -18,6 +18,7 @@ const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 let otakudesuOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 let anichinOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 let juraganfilmOngoingCache: CacheEntry<AnimeCard[]> | null = null;
+let jikanOngoingCache: CacheEntry<AnimeCard[]> | null = null;
 
 // Thread-safe in-memory cache for details, catalog, searches, and episodes
 const globalScraperCache = new Map<string, CacheEntry<any>>();
@@ -208,6 +209,56 @@ export interface MirrorStream {
     i: number;
     q: string;
   };
+}
+// ==========================================
+// JIKAN API (MyAnimeList) - Global Fallback
+// Always accessible from any server worldwide
+// ==========================================
+
+export async function getJikanOngoingAnime(): Promise<AnimeCard[]> {
+  const now = Date.now();
+  if (jikanOngoingCache && (now - jikanOngoingCache.timestamp) < CACHE_TTL_MS) {
+    return jikanOngoingCache.data;
+  }
+
+  try {
+    // Fetch current season anime from Jikan API (free, no auth needed)
+    const res = await fetch('https://api.jikan.moe/v4/seasons/now?filter=tv&limit=25', {
+      headers: { 'Accept': 'application/json' },
+      next: { revalidate: 300 }
+    });
+
+    if (!res.ok) throw new Error(`Jikan API error: ${res.status}`);
+
+    const json = await res.json();
+    const data = json.data || [];
+
+    const animeList: AnimeCard[] = data
+      .filter((a: any) => a.status === 'Currently Airing' || a.airing === true)
+      .map((a: any) => {
+        const slug = a.title_english
+          ? a.title_english.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+          : a.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+        return {
+          title: a.title_english || a.title,
+          slug: `jikan-${a.mal_id}-${slug}`,
+          url: a.url || `https://myanimelist.net/anime/${a.mal_id}`,
+          img: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || '',
+          ep: `Ep ${a.episodes || '?'}`,
+          type: 'anime' as const,
+          status: a.status === 'Currently Airing' ? 'Ongoing' : 'Completed',
+        };
+      });
+
+    if (animeList.length > 0) {
+      jikanOngoingCache = { data: animeList, timestamp: now };
+    }
+    return animeList;
+  } catch (err) {
+    console.error('Error in getJikanOngoingAnime:', err);
+    return jikanOngoingCache ? jikanOngoingCache.data : [];
+  }
 }
 
 export async function getOtakudesuOngoing(): Promise<AnimeCard[]> {
