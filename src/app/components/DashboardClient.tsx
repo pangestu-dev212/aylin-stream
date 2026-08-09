@@ -31,6 +31,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   const [searchResults, setSearchResults] = useState<AnimeCard[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFilter, setSearchFilter] = useState<'ALL' | 'anime' | 'donghua' | 'drama'>('ALL');
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Bookmarks state
@@ -281,6 +282,10 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
     lastEpSlug: string;
     timestamp: number;
     source?: string;
+    progress?: {
+      currentTime: number;
+      duration: number;
+    };
   }
 
   interface ScheduleItem {
@@ -829,6 +834,15 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
     setSearchQuery('');
     setSearchResults([]);
     setSearchOpen(false);
+    setSearchFilter('ALL');
+  };
+
+  // Helper to format seconds to mm:ss
+  const formatTime = (secs: number) => {
+    if (!secs || isNaN(secs)) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   // Export all local watch history and settings as JSON
@@ -962,16 +976,47 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
 
             {/* Search Result Overlay */}
             {searchOpen && (
-              <div className="absolute right-0 mt-3 w-[340px] sm:w-[420px] max-h-[480px] overflow-y-auto glass-card rounded-2xl p-4 shadow-2xl z-[100]">
-                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-2">
+              <div className="absolute right-0 mt-3 w-[340px] sm:w-[420px] max-h-[480px] overflow-y-auto glass-card rounded-2xl p-4 shadow-2xl z-[100] flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
                   <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Hasil Pencarian</span>
                   <span className="text-xs text-slate-500">{searchResults.length} ditemukan</span>
                 </div>
 
+                {/* Search category filters */}
+                {!searchLoading && searchResults.length > 0 && (
+                  <div className="flex items-center gap-1.5 pb-2 border-b border-slate-800/80 overflow-x-auto scrollbar-none">
+                    {(['ALL', 'anime', 'donghua', 'drama'] as const).map((filter) => {
+                      const count = filter === 'ALL' 
+                        ? searchResults.length 
+                        : searchResults.filter(item => item.type === filter).length;
+                      return (
+                        <button
+                          key={filter}
+                          onClick={() => setSearchFilter(filter)}
+                          className={`text-[9px] px-2 py-1 rounded-full font-bold uppercase transition-all cursor-pointer flex-shrink-0 ${
+                            searchFilter === filter
+                              ? 'bg-violet-600 text-white'
+                              : 'bg-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/10'
+                          }`}
+                        >
+                          {filter} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {searchLoading ? (
-                  <div className="flex flex-col items-center justify-center py-8 gap-2">
-                    <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-xs text-slate-400">Sedang mencari...</span>
+                  <div className="flex flex-col gap-2.5">
+                    {Array(4).fill(0).map((_, i) => (
+                      <div key={`search-skeleton-${i}`} className="flex items-center gap-3 p-2 rounded-xl border border-white/5 bg-slate-900/10">
+                        <div className="w-12 h-16 rounded-md bg-slate-800/60 shimmer flex-shrink-0" />
+                        <div className="flex-1 min-w-0 flex flex-col gap-2">
+                          <div className="h-3 w-3/4 bg-slate-800/60 rounded shimmer" />
+                          <div className="h-2 w-1/4 bg-slate-800/60 rounded shimmer" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : searchResults.length === 0 ? (
                   <div className="text-center py-8 text-sm text-slate-500">
@@ -979,39 +1024,49 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2.5">
-                    {searchResults.map((item) => (
-                      <Link
-                        key={`${item.type}-${item.slug}`}
-                        href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
-                        className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-xl transition-colors group"
-                      >
-                        <div className="relative w-12 h-16 rounded-md overflow-hidden bg-slate-800 flex-shrink-0">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img 
-                            src={item.img ? `/api/image-proxy?url=${encodeURIComponent(item.img)}` : undefined} 
-                            alt={item.title} 
-                            className="object-cover w-full h-full group-hover:scale-105 transition-transform" 
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-200 truncate group-hover:text-violet-400 transition-colors">
-                            {item.title}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
-                              item.type === 'donghua' 
-                                ? 'bg-fuchsia-950 text-fuchsia-400 border border-fuchsia-800/30' 
-                                : item.type === 'drama'
-                                  ? 'bg-rose-950 text-rose-400 border border-rose-800/30'
-                                  : 'bg-violet-950 text-violet-400 border border-violet-800/30'
-                            }`}>
-                              {item.type}
-                            </span>
+                    {(() => {
+                      const filtered = searchResults.filter(item => searchFilter === 'ALL' || item.type === searchFilter);
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-6 text-xs text-slate-500">
+                            Tidak ada hasil kategori "{searchFilter}"
                           </div>
-                        </div>
-                        <ArrowUpRight size={16} className="text-slate-500 group-hover:text-violet-400 transition-colors" />
-                      </Link>
-                    ))}
+                        );
+                      }
+                      return filtered.map((item) => (
+                        <Link
+                          key={`${item.type}-${item.slug}`}
+                          href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
+                          className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-xl transition-colors group"
+                        >
+                          <div className="relative w-12 h-16 rounded-md overflow-hidden bg-slate-800 flex-shrink-0">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img 
+                              src={item.img ? `/api/image-proxy?url=${encodeURIComponent(item.img)}` : undefined} 
+                              alt={item.title} 
+                              className="object-cover w-full h-full group-hover:scale-105 transition-transform" 
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-200 truncate group-hover:text-violet-400 transition-colors">
+                              {item.title}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                                item.type === 'donghua' 
+                                  ? 'bg-fuchsia-950 text-fuchsia-400 border border-fuchsia-800/30' 
+                                  : item.type === 'drama'
+                                    ? 'bg-rose-950 text-rose-400 border border-rose-800/30'
+                                    : 'bg-violet-950 text-violet-400 border border-violet-800/30'
+                              }`}>
+                                {item.type}
+                              </span>
+                            </div>
+                          </div>
+                          <ArrowUpRight size={16} className="text-slate-500 group-hover:text-violet-400 transition-colors" />
+                        </Link>
+                      ));
+                    })()}
                   </div>
                 )}
               </div>
@@ -1343,13 +1398,27 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   }`}>
                     {item.type}
                   </span>
+                  {/* Playback progress bar */}
+                  {item.progress && item.progress.duration > 0 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-950/75 z-10 overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-fuchsia-500 to-violet-500 transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.floor((item.progress.currentTime / item.progress.duration) * 100))}%` }}
+                      />
+                    </div>
+                  )}
                 </Link>
                 <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
                   <Link href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`} className="font-bold text-sm text-slate-200 line-clamp-1 group-hover:text-fuchsia-400 transition-colors">
                     {item.title}
                   </Link>
-                  <span className="text-[10px] font-semibold text-fuchsia-400 flex items-center gap-1.5 bg-fuchsia-950/40 border border-fuchsia-900/30 w-max px-2 py-0.5 rounded-full">
-                    Lanjut: {item.lastEpTitle.replace(/Subtitle Indonesia/i, '').replace(/Sub Indo/i, '').trim()}
+                  <span className="text-[10px] font-semibold text-fuchsia-400 flex flex-wrap items-center gap-1 bg-fuchsia-950/40 border border-fuchsia-900/30 w-max px-2 py-0.5 rounded-full">
+                    <span>Lanjut: {item.lastEpTitle.replace(/Subtitle Indonesia/i, '').replace(/Sub Indo/i, '').trim()}</span>
+                    {item.progress && item.progress.duration > 0 && (
+                      <span className="text-[9px] text-fuchsia-300/80 font-normal border-l border-fuchsia-800/40 pl-1.5 ml-0.5">
+                        {formatTime(item.progress.currentTime)} / {formatTime(item.progress.duration)}
+                      </span>
+                    )}
                   </span>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Play, Star, ArrowLeft, List, 
@@ -112,12 +112,19 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
 
   // Recommendations state
   const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(true);
 
   // Auto-Next & Skip Intro States
   const [isAutoNextEnabled, setIsAutoNextEnabled] = useState(false);
   const [episodeDuration, setEpisodeDuration] = useState(1320); // 22 mins default
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isTimerPaused, setIsTimerPaused] = useState(false);
+
+  // HUD states & refs
+  const [hudMessage, setHudMessage] = useState('');
+  const [hudVisible, setHudVisible] = useState(false);
+  const hudTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasResumedRef = useRef<string | null>(null);
   const [showNextTransition, setShowNextTransition] = useState(false);
   const [transitionCountdown, setTransitionCountdown] = useState(5);
 
@@ -237,6 +244,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
   // Fetch ongoing recommendations on mount
   useEffect(() => {
     const fetchRecommendations = async () => {
+      setRecommendationsLoading(true);
       try {
         const res = await fetch(`/api/ongoing?type=${type}`);
         const json = await res.json();
@@ -254,6 +262,8 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         }
       } catch (e) {
         console.error("Failed to load recommendations:", e);
+      } finally {
+        setRecommendationsLoading(false);
       }
     };
     fetchRecommendations();
@@ -325,15 +335,25 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
       if (key === 'n') {
         e.preventDefault();
         playNextEpisode();
+        showHUD('Episode Baru ⏭️');
       } else if (key === 'p') {
         e.preventDefault();
         playPrevEpisode();
+        showHUD('Episode Lama ⏮️');
       } else if (key === 't') {
         e.preventDefault();
-        setTheatreMode(prev => !prev);
+        setTheatreMode(prev => {
+          const nextVal = !prev;
+          showHUD(nextVal ? 'Theater Mode: ON 🎭' : 'Theater Mode: OFF 🎭');
+          return nextVal;
+        });
       } else if (key === 'c') {
         e.preventDefault();
-        setCinemaMode(prev => !prev);
+        setCinemaMode(prev => {
+          const nextVal = !prev;
+          showHUD(nextVal ? 'Cinema Mode: ON 🎬' : 'Cinema Mode: OFF 🎬');
+          return nextVal;
+        });
       } else if (key === 'b') {
         e.preventDefault();
         toggleBookmark();
@@ -443,6 +463,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
     }
     localStorage.setItem(bookKey, JSON.stringify(list));
     setIsBookmarked(willBookmark);
+    showHUD(willBookmark ? 'Ditambahkan ke Bookmark ⭐' : 'Dihapus dari Bookmark 🗑️');
   };
 
   // Helper to save preferred mirror to preferences
@@ -628,6 +649,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
 
   // Load episode and fetch mirrors
   const loadEpisode = async (episode: EpisodeLink) => {
+    hasResumedRef.current = null;
     setActiveEpisode(episode);
     setEpisodeLoading(true);
     setMirrors([]);
@@ -866,6 +888,160 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
     }
   };
 
+  // HUD and Fallback Helpers
+  const showHUD = (message: string) => {
+    setHudMessage(message);
+    setHudVisible(true);
+    if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+    hudTimeoutRef.current = setTimeout(() => {
+      setHudVisible(false);
+    }, 1500);
+  };
+
+  const triggerAutoFallback = () => {
+    if (mirrors.length <= 1 || !activeMirror) return;
+    const currentIdx = mirrors.findIndex(m => m.playerText === activeMirror.playerText);
+    if (currentIdx !== -1 && currentIdx < mirrors.length - 1) {
+      const nextMirror = mirrors[currentIdx + 1];
+      showHUD(`Error dideteksi, beralih ke: ${nextMirror.playerText}`);
+      selectMirror(nextMirror);
+    } else {
+      showHUD("Semua server mirror telah dicoba.");
+    }
+  };
+
+  // Helper to dynamically match theme ambient glows
+  const getThemeGlowClass = () => {
+    switch (theme) {
+      case 'theme-neon-green':
+        return 'from-emerald-500/15 to-teal-500/15';
+      case 'theme-cyberpunk-orange':
+        return 'from-orange-500/15 to-amber-500/15';
+      case 'theme-crimson-red':
+        return 'from-rose-500/15 to-red-500/15';
+      case 'theme-ocean-blue':
+        return 'from-sky-500/15 to-cyan-500/15';
+      case 'theme-light-mode':
+        return 'from-violet-300/10 to-indigo-300/10';
+      default:
+        return 'from-violet-500/15 to-fuchsia-500/15';
+    }
+  };
+
+  // Save/load playback progress and auto-resume for same-origin video elements
+  useEffect(() => {
+    if (episodeLoading || playerLoading || error || !activeEpisode) return;
+
+    const interval = setInterval(() => {
+      try {
+        const iframe = document.querySelector('iframe');
+        if (iframe) {
+          const isDocumentAccessible = (doc: Document | null) => {
+            if (!doc) return false;
+            try {
+              const _ = doc.location.href;
+              return true;
+            } catch {
+              return false;
+            }
+          };
+
+          const doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
+          if (doc && isDocumentAccessible(doc)) {
+            let video = doc.querySelector('video');
+            if (!video) {
+              const nestedIframes = doc.querySelectorAll('iframe');
+              for (let i = 0; i < nestedIframes.length; i++) {
+                try {
+                  const nestedDoc = nestedIframes[i].contentDocument || nestedIframes[i].contentWindow?.document;
+                  if (nestedDoc && isDocumentAccessible(nestedDoc)) {
+                    const nestedVideo = nestedDoc.querySelector('video');
+                    if (nestedVideo) {
+                      video = nestedVideo;
+                      break;
+                    }
+                  }
+                } catch {}
+              }
+            }
+
+            if (video) {
+              // 1. Bind error fallback handler if not already bound
+              if (!video.onerror) {
+                video.onerror = () => {
+                  triggerAutoFallback();
+                };
+              }
+
+              // 2. Handle auto-resume if we haven't resumed this episode yet
+              if (video.duration && hasResumedRef.current !== activeEpisode.slug) {
+                const progressKey = 'aylin_playback_progress';
+                const saved = localStorage.getItem(progressKey);
+                if (saved) {
+                  try {
+                    const progressMap = JSON.parse(saved);
+                    const key = `${slug}:${activeEpisode.slug}`;
+                    const savedProgress = progressMap[key];
+                    if (savedProgress && savedProgress.currentTime > 5 && savedProgress.currentTime < savedProgress.duration - 15) {
+                      video.currentTime = savedProgress.currentTime;
+                      showHUD(`Melanjutkan tontonan dari ${Math.floor(savedProgress.currentTime / 60)}m`);
+                    }
+                  } catch {}
+                }
+                hasResumedRef.current = activeEpisode.slug;
+              }
+
+              // 3. Save progress regularly
+              if (video.duration && !video.paused) {
+                const progressKey = 'aylin_playback_progress';
+                const saved = localStorage.getItem(progressKey);
+                let progressMap: Record<string, any> = {};
+                if (saved) {
+                  try { progressMap = JSON.parse(saved); } catch {}
+                }
+                
+                const key = `${slug}:${activeEpisode.slug}`;
+                const currentTime = Math.floor(video.currentTime);
+                const duration = Math.floor(video.duration);
+                progressMap[key] = {
+                  currentTime,
+                  duration,
+                  updatedAt: new Date().toISOString()
+                };
+                localStorage.setItem(progressKey, JSON.stringify(progressMap));
+
+                // Sync directly into the active history item
+                try {
+                  const profile = localStorage.getItem('aylin_active_profile') || 'Utama';
+                  const histKey = getScopedKey('aylin_history', profile);
+                  const historyJson = localStorage.getItem(histKey);
+                  if (historyJson) {
+                    let historyList = JSON.parse(historyJson);
+                    let updated = false;
+                    historyList = historyList.map((item: any) => {
+                      if (item.slug === slug && item.lastEpSlug === activeEpisode.slug) {
+                        item.progress = { currentTime, duration };
+                        updated = true;
+                      }
+                      return item;
+                    });
+                    if (updated) {
+                      localStorage.setItem(histKey, JSON.stringify(historyList));
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Silent catch for cross-origin access blocks
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [activeEpisode, episodeLoading, playerLoading, error, slug]);
+
   // Episode Navigation Helpers
   const hasNextEpisode = () => {
     if (!activeEpisode || !data.episodes) return false;
@@ -925,12 +1101,12 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
   return (
     <div className="flex flex-col min-h-screen pb-16 relative">
       {/* Cinema Mode Dimming Overlay */}
-      {cinemaMode && (
-        <div 
-          className="fixed inset-0 bg-black/95 z-40 transition-opacity duration-300"
-          onClick={() => setCinemaMode(false)}
-        />
-      )}
+      <div 
+        className={`fixed inset-0 bg-black/95 z-40 transition-all duration-500 ease-in-out ${
+          cinemaMode ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={() => setCinemaMode(false)}
+      />
 
       {/* Header Bar */}
       <nav className={`w-full glass-nav px-4 sm:px-8 py-3 flex items-center justify-between gap-4 z-[100] ${cinemaMode ? 'relative' : 'sticky top-0'}`}>
@@ -1150,10 +1326,21 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* Player + Episode list (col-span-8 or col-span-12) */}
-          <div className={`${theatreMode ? 'lg:col-span-12' : 'lg:col-span-8'} flex flex-col gap-4`}>
+          <div className={`${theatreMode ? 'lg:col-span-12' : 'lg:col-span-8'} flex flex-col gap-4 relative group/player`}>
             
+            {/* Ambient Glow Background */}
+            <div className={`absolute -inset-3 bg-gradient-to-r ${getThemeGlowClass()} rounded-[28px] blur-3xl opacity-75 group-hover/player:opacity-100 transition-all duration-500 pointer-events-none -z-10`} />
+
             {/* Player Container */}
-            <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border border-white/5 shadow-2xl">
+            <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border border-white/5 shadow-2xl z-10">
+              {/* HUD Keyboard Shortcut Notification Overlay */}
+              <div 
+                className={`absolute top-4 left-1/2 -translate-x-1/2 bg-slate-950/80 border border-white/10 px-4 py-2 rounded-full text-xs font-bold text-slate-100 shadow-2xl z-45 transition-all duration-300 pointer-events-none flex items-center gap-1.5 backdrop-blur-md ${
+                  hudVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-4 scale-95'
+                }`}
+              >
+                <span>📺</span> {hudMessage}
+              </div>
               {episodeLoading ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                   <div className="w-10 h-10 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
@@ -1168,12 +1355,22 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-3">
                   <AlertTriangle size={36} className="text-amber-500 animate-pulse" />
                   <span className="text-sm font-semibold text-slate-300">{error}</span>
-                  <button 
-                    onClick={() => activeEpisode && loadEpisode(activeEpisode)}
-                    className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-full text-xs hover:bg-slate-800 transition-colors"
-                  >
-                    <RefreshCw size={12} /> Coba Lagi
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+                    <button 
+                      onClick={() => activeEpisode && loadEpisode(activeEpisode)}
+                      className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-full text-xs hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw size={12} /> Coba Lagi
+                    </button>
+                    {mirrors.length > 1 && (
+                      <button 
+                        onClick={triggerAutoFallback}
+                        className="flex items-center gap-2 bg-violet-600/90 border border-violet-500 hover:bg-violet-500 text-white px-4 py-2 rounded-full text-xs transition-colors cursor-pointer"
+                      >
+                        <RefreshCw size={12} /> Gunakan Server Cadangan
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : playerSrc ? (
                 <>
@@ -1534,7 +1731,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         </div>
 
         {/* Recommendations Section */}
-        {recommendations.length > 0 && (
+        {(recommendations.length > 0 || recommendationsLoading) && (
           <div className="flex flex-col gap-4 border-t border-white/5 pt-8 mt-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1549,30 +1746,40 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
-              {recommendations.map((item) => (
-                <Link
-                  key={`rec-${item.slug}`}
-                  href={`/watch/${type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
-                  className="flex flex-col gap-2 group cursor-pointer"
-                >
-                  <div className="relative aspect-[3/4] w-full rounded-2xl overflow-hidden bg-slate-900 shadow border border-white/5">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={item.img ? `/api/image-proxy?url=${encodeURIComponent(item.img)}` : undefined}
-                      alt={item.title}
-                      className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
-                    />
-                    {item.ep && (
-                      <span className="absolute bottom-2 left-2 text-[9px] bg-slate-950/80 backdrop-blur border border-white/10 px-2 py-0.5 rounded-full text-slate-200 font-extrabold">
-                        {item.ep}
-                      </span>
-                    )}
+              {recommendationsLoading ? (
+                Array(8).fill(0).map((_, i) => (
+                  <div key={`rec-skeleton-${i}`} className="flex flex-col gap-2 animate-pulse">
+                    <div className="aspect-[3/4] w-full bg-slate-900/60 border border-white/5 rounded-2xl shimmer" />
+                    <div className="h-3 w-3/4 bg-slate-900/60 rounded shimmer" />
+                    <div className="h-2.5 w-1/2 bg-slate-900/60 rounded shimmer" />
                   </div>
-                  <h4 className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors line-clamp-2 leading-snug px-1">
-                    {item.title}
-                  </h4>
-                </Link>
-              ))}
+                ))
+              ) : (
+                recommendations.map((item) => (
+                  <Link
+                    key={`rec-${item.slug}`}
+                    href={`/watch/${type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
+                    className="flex flex-col gap-2 group cursor-pointer"
+                  >
+                    <div className="relative aspect-[3/4] w-full rounded-2xl overflow-hidden bg-slate-900 shadow border border-white/5">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={item.img ? `/api/image-proxy?url=${encodeURIComponent(item.img)}` : undefined}
+                        alt={item.title}
+                        className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
+                      />
+                      {item.ep && (
+                        <span className="absolute bottom-2 left-2 text-[9px] bg-slate-950/80 backdrop-blur border border-white/10 px-2 py-0.5 rounded-full text-slate-200 font-extrabold">
+                          {item.ep}
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors line-clamp-2 leading-snug px-1">
+                      {item.title}
+                    </h4>
+                  </Link>
+                ))
+              )}
             </div>
           </div>
         )}
