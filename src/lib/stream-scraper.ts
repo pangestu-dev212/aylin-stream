@@ -1051,6 +1051,64 @@ export async function getAnichinCatalog(letter: string, page = 1): Promise<{ res
 
 const SAMEHADAKU_BASE = 'https://v2.samehadaku.how';
 
+let samehadakuOngoingCache: { data: AnimeCard[]; timestamp: number } | null = null;
+
+export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
+  const now = Date.now();
+  if (samehadakuOngoingCache && (now - samehadakuOngoingCache.timestamp) < CACHE_TTL_MS) {
+    return samehadakuOngoingCache.data;
+  }
+
+  try {
+    const html = await fetchHtml(`${SAMEHADAKU_BASE}/ongoing-anime/`);
+    const $ = cheerio.load(html);
+    const ongoing: AnimeCard[] = [];
+
+    // Samehadaku uses .animepost or .bs .bsx structure
+    $('.animepost, .bs .bsx, .listupd .bs').each((i, el) => {
+      const title = $(el).find('.tt, .ntitle, h4, h3').first().text().trim();
+      const href = $(el).find('a').first().attr('href') || '';
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const ep = $(el).find('.epx, .ep').text().trim();
+      const slug = extractSlug(href);
+
+      if (title && slug) {
+        ongoing.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime' });
+      }
+    });
+
+    if (ongoing.length > 0) {
+      samehadakuOngoingCache = { data: ongoing, timestamp: now };
+      return ongoing;
+    }
+
+    // Fallback: try homepage
+    const homeHtml = await fetchHtml(`${SAMEHADAKU_BASE}/`);
+    const $home = cheerio.load(homeHtml);
+    const homeList: AnimeCard[] = [];
+
+    $home('.animepost, .bs .bsx, .listupd .bs, .releases .rl-left .data').each((i, el) => {
+      const title = $home(el).find('.tt, .ntitle, h4, h3').first().text().trim();
+      const href = $home(el).find('a').first().attr('href') || '';
+      const img = $home(el).find('img').attr('src') || $home(el).find('img').attr('data-src') || '';
+      const ep = $home(el).find('.epx, .ep').text().trim();
+      const slug = extractSlug(href);
+
+      if (title && slug) {
+        homeList.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime' });
+      }
+    });
+
+    if (homeList.length > 0) {
+      samehadakuOngoingCache = { data: homeList, timestamp: now };
+    }
+    return homeList;
+  } catch (err) {
+    console.error('Error in getSamehadakuOngoing:', err);
+    return samehadakuOngoingCache ? samehadakuOngoingCache.data : [];
+  }
+}
+
 export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `samehadaku:detail:${slug}`;
   const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
