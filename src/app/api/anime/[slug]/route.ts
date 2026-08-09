@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOtakudesuDetail, getAnichinDetail, getSamehadakuDetail, getAnimeXinDetail, getDonghuastreamDetail } from '@/lib/stream-scraper';
+import { getOtakudesuDetail, getOtakudesuSearch, getAnichinDetail, getSamehadakuDetail, getSamehadakuSearch, getAnimeXinDetail, getDonghuastreamDetail } from '@/lib/stream-scraper';
+
+/**
+ * Extract a clean search query from an AniList or Jikan prefixed slug.
+ * e.g. "anilist-135865-saga-of-tanya-the-evil-season-2" → "saga of tanya the evil season 2"
+ */
+function extractTitleFromExternalSlug(slug: string): string {
+  // Remove "anilist-{id}-" or "jikan-{id}-" prefix
+  const cleaned = slug.replace(/^(anilist|jikan)-\d+-/, '');
+  // Convert hyphens back to spaces
+  return cleaned.replace(/-/g, ' ').trim();
+}
 
 export async function GET(
   req: NextRequest,
@@ -13,6 +24,36 @@ export async function GET(
 
     let data = null;
 
+    // Handle AniList / Jikan slugs → auto-search Otakudesu/Samehadaku
+    const isExternalSlug = slug.startsWith('anilist-') || slug.startsWith('jikan-');
+    if (isExternalSlug) {
+      const searchTitle = extractTitleFromExternalSlug(slug);
+
+      // Try Otakudesu search first
+      const otakuResults = await getOtakudesuSearch(searchTitle).catch(() => []);
+      if (otakuResults.length > 0) {
+        data = await getOtakudesuDetail(otakuResults[0].slug).catch(() => null);
+      }
+
+      // Fallback: try Samehadaku search
+      if (!data) {
+        const sameResults = await getSamehadakuSearch(searchTitle).catch(() => []);
+        if (sameResults.length > 0) {
+          data = await getSamehadakuDetail(sameResults[0].slug).catch(() => null);
+        }
+      }
+
+      if (!data) {
+        return NextResponse.json(
+          { success: false, error: `Anime "${searchTitle}" tidak ditemukan di sumber manapun.` },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json({ success: true, data });
+    }
+
+    // Normal slug handling
     if (source === 'samehadaku') {
       data = await getSamehadakuDetail(slug);
     } else if (source === 'animexin') {
