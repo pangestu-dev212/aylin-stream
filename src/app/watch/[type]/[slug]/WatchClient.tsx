@@ -87,6 +87,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
   const [playerSrc, setPlayerSrc] = useState<string>('');
   const [episodeLoading, setEpisodeLoading] = useState(false);
   const [playerLoading, setPlayerLoading] = useState(false);
+  const [downloads, setDownloads] = useState<{ quality: string; size: string; links: { host: string; url: string }[] }[]>([]);
   const [error, setError] = useState<string>('');
 
   // UI state
@@ -332,7 +333,52 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
       }
 
       const key = e.key.toLowerCase();
-      if (key === 'n') {
+      if (e.code === 'Space') {
+        const video = document.querySelector('video');
+        if (video) {
+          e.preventDefault();
+          if (video.paused) {
+            video.play().catch(() => {});
+            showHUD('Putar ▶️');
+          } else {
+            video.pause();
+            showHUD('Jeda ⏸️');
+          }
+        }
+      } else if (e.code === 'ArrowLeft') {
+        const video = document.querySelector('video');
+        if (video) {
+          e.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - 10);
+          showHUD('Mundur 10s ⏪');
+        }
+      } else if (e.code === 'ArrowRight') {
+        const video = document.querySelector('video');
+        if (video) {
+          e.preventDefault();
+          video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+          showHUD('Maju 10s ⏩');
+        }
+      } else if (key === 'f') {
+        const playerContainer = document.querySelector('.group\\/player .aspect-video');
+        if (playerContainer) {
+          e.preventDefault();
+          if (!document.fullscreenElement) {
+            (playerContainer as any).requestFullscreen?.().catch(() => {});
+            showHUD('Layar Penuh ⛶');
+          } else {
+            document.exitFullscreen?.().catch(() => {});
+            showHUD('Keluar Layar Penuh');
+          }
+        }
+      } else if (key === 'm') {
+        const video = document.querySelector('video');
+        if (video) {
+          e.preventDefault();
+          video.muted = !video.muted;
+          showHUD(video.muted ? 'Mute 🔇' : 'Suara Aktif 🔊');
+        }
+      } else if (key === 'n') {
         e.preventDefault();
         playNextEpisode();
         showHUD('Episode Baru ⏭️');
@@ -506,16 +552,22 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
       const needsProxy = !publicHosts.some(host =>
         hostname === host || hostname.endsWith('.' + host)
       ) && !hostname.includes('gdriveplayer');
+
       if (needsProxy) {
+        // Direct video files (.mp4) don't need HTML proxying
+        if (normalizedSrc.endsWith('.mp4') || normalizedSrc.includes('.mp4?')) {
+          return normalizedSrc;
+        }
+
         let refererParam = '';
         if (activeSource === 'cadangan') {
-          refererParam = type === 'donghua' ? 'https://animexin.dev' : 'https://v2.samehadaku.how';
+          refererParam = type === 'donghua' ? 'https://animexin.dev' : 'https://samehadaku.video';
         } else if (type === 'donghua') {
           refererParam = 'https://anichin.moe';
         } else if (type === 'drama') {
-          refererParam = 'https://tv48.juragan.film';
+          refererParam = 'https://tv49.juragan.film';
         } else {
-          refererParam = 'https://otakudesu.cloud';
+          refererParam = 'https://otakudesu.blog';
         }
         return `/api/stream-proxy?url=${encodeURIComponent(normalizedSrc)}&referer=${encodeURIComponent(refererParam)}`;
       }
@@ -751,6 +803,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
 
       const fetchedMirrors = json.data.mirrors || [];
       setMirrors(fetchedMirrors);
+      setDownloads(json.data.downloads || []);
 
       if (fetchedMirrors.length > 0) {
         // Auto-select preferred mirror or fallback to first mirror
@@ -1374,14 +1427,31 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                 </div>
               ) : playerSrc ? (
                 <>
-                  <iframe
-                    src={playerSrc}
-                    className="w-full h-full border-0"
-                    allowFullScreen
-                    scrolling="no"
-                    referrerPolicy="no-referrer"
-                    sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-top-navigation"
-                  />
+                  {playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?') || activeMirror?.payload?.directSrc ? (
+                    <video
+                      key={playerSrc}
+                      src={activeMirror?.payload?.directSrc || playerSrc}
+                      controls
+                      autoPlay
+                      playsInline
+                      onEnded={() => {
+                        if (hasNextEpisode()) {
+                          showHUD('Episode Selesai, memutar episode berikutnya... ⏭️');
+                          playNextEpisode();
+                        }
+                      }}
+                      className="w-full h-full object-contain bg-black"
+                    />
+                  ) : (
+                    <iframe
+                      src={playerSrc}
+                      className="w-full h-full border-0"
+                      allowFullScreen
+                      scrolling="no"
+                      referrerPolicy="no-referrer"
+                      sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-top-navigation"
+                    />
+                  )}
 
                   {/* Floating Skip Intro Button */}
                   {elapsedTime < 90 && !episodeLoading && !playerLoading && !error && (
@@ -1604,13 +1674,57 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
 
             {/* Keyboard Shortcuts Tooltip Legend */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-2.5 bg-slate-900/30 border border-white/5 rounded-2xl text-[10px] text-slate-500 font-medium">
-              <span className="font-bold uppercase tracking-wider text-slate-400">Pintasan Keyboard (Hotkeys):</span>
+              <span className="font-bold uppercase tracking-wider text-slate-400">Pintasan Keyboard:</span>
+              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">Spasi</kbd> Putar/Jeda</span>
+              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">← / →</kbd> -/+ 10s</span>
+              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">F</kbd> Layar Penuh</span>
+              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">M</kbd> Mute</span>
               <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">N</kbd> Episode Baru</span>
               <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">P</kbd> Episode Lama</span>
-              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">T</kbd> Theater Mode</span>
-              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">C</kbd> Cinema Mode</span>
-              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">B</kbd> Bookmark</span>
+              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">T</kbd> Theater</span>
+              <span><kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-slate-400">C</kbd> Cinema</span>
             </div>
+
+            {/* Download Links Section */}
+            {downloads.length > 0 && (
+              <div className="p-5 glass-card rounded-2xl flex flex-col gap-3.5 border border-white/10 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">📥</span>
+                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                      Unduh Episode (Nonton Offline)
+                    </h3>
+                  </div>
+                  <span className="text-[10px] text-violet-400 font-bold bg-violet-500/10 px-2.5 py-1 rounded-full border border-violet-500/20">
+                    {downloads.length} Pilihan Resolusi
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {downloads.map((dl, idx) => (
+                    <div key={idx} className="bg-slate-900/60 border border-white/5 p-3 rounded-xl flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-xs font-bold">
+                        <span className="text-violet-400 font-mono">{dl.quality}</span>
+                        {dl.size && <span className="text-[10px] text-slate-400 bg-white/5 px-2 py-0.5 rounded-full">{dl.size}</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {dl.links.map((link, lIdx) => (
+                          <a
+                            key={lIdx}
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1 bg-white/5 hover:bg-violet-600/80 hover:text-white border border-white/5 rounded-lg text-[10px] font-bold text-slate-300 transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>⬇️</span> {link.host}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Episode List Container */}
             <div className="flex flex-col gap-4 p-5 glass-card rounded-2xl">

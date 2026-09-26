@@ -15,20 +15,57 @@ if (typeof process !== 'undefined') {
 }
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+// In-memory DNS cache to avoid repeated lookups
+const dnsCache = new Map<string, { ip: string; timestamp: number }>();
+const DNS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
 /**
- * Resolve domain to IP via Cloudflare DNS-over-HTTPS
+ * Resolve domain to IP via 1.1.1.1 / Google DNS-over-HTTPS
  */
 async function resolveDns(domain: string): Promise<string | null> {
+  const cached = dnsCache.get(domain);
+  if (cached && (Date.now() - cached.timestamp) < DNS_CACHE_TTL_MS) {
+    return cached.ip;
+  }
+
+  // 1. Try 1.1.1.1
   try {
-    const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=A`, {
-      headers: { 'accept': 'application/dns-json' }
+    const res = await fetch(`https://1.1.1.1/dns-query?name=${encodeURIComponent(domain)}&type=A`, {
+      headers: { 'accept': 'application/dns-json' },
+      signal: AbortSignal.timeout(2500)
     });
-    const data = await res.json();
-    if (data.Answer && data.Answer.length > 0) {
-      const aRecord = data.Answer.find((r: any) => r.type === 1);
-      if (aRecord) return String(aRecord.data);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        const aRecord = data.Answer.find((r: any) => r.type === 1);
+        if (aRecord) {
+          const ip = String(aRecord.data);
+          dnsCache.set(domain, { ip, timestamp: Date.now() });
+          return ip;
+        }
+      }
     }
-  } catch { /* silent */ }
+  } catch {}
+
+  // 2. Try Google DoH
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=A`, {
+      headers: { 'accept': 'application/dns-json' },
+      signal: AbortSignal.timeout(2500)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        const aRecord = data.Answer.find((r: any) => r.type === 1);
+        if (aRecord) {
+          const ip = String(aRecord.data);
+          dnsCache.set(domain, { ip, timestamp: Date.now() });
+          return ip;
+        }
+      }
+    }
+  } catch {}
+
   return null;
 }
 
@@ -156,7 +193,7 @@ function rewriteHtml(html: string, originalUrl: string, refererOrigin: string): 
       const iframeUrl = new URL(absoluteIframeSrc);
       const host = iframeUrl.hostname;
       
-      const matchDomains = ['anichin', 'animexin', 'samehadaku', 'otakudesu', 'gdriveplayer', 'juragan'];
+      const matchDomains = ['anichin', 'animexin', 'samehadaku', 'otakudesu', 'gdriveplayer', 'juragan', 'putarin', 'rapidvideo'];
       if (matchDomains.some(d => host.includes(d))) {
         return `${prefix}/api/stream-proxy?url=${encodeURIComponent(absoluteIframeSrc)}&referer=${encodeURIComponent(refererOrigin)}"`;
       }
@@ -194,10 +231,12 @@ export async function GET(req: NextRequest) {
       refererOrigin = 'https://anichin.moe';
     } else if (parsedTarget.hostname.includes('animexin')) {
       refererOrigin = 'https://animexin.dev';
-    } else if (parsedTarget.hostname.includes('samehadaku')) {
-      refererOrigin = 'https://v2.samehadaku.how';
+    } else if (parsedTarget.hostname.includes('samehadaku') || parsedTarget.hostname.includes('putarin')) {
+      refererOrigin = 'https://samehadaku.video';
+    } else if (parsedTarget.hostname.includes('juragan') || parsedTarget.hostname.includes('rapidvideo')) {
+      refererOrigin = 'https://tv49.juragan.film';
     } else if (parsedTarget.hostname.includes('otakudesu')) {
-      refererOrigin = 'https://otakudesu.cloud';
+      refererOrigin = 'https://otakudesu.blog';
     }
   }
 

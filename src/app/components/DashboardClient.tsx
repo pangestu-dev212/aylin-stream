@@ -413,9 +413,34 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   };
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [liveSchedule, setLiveSchedule] = useState<Record<string, ScheduleItem[]>>(weeklySchedule);
   const [selectedScheduleDay, setSelectedScheduleDay] = useState<string>('');
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
+
+  // Fetch live weekly schedule from /api/schedule
+  useEffect(() => {
+    fetch('/api/schedule')
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.schedule) && json.schedule.length > 0) {
+          const merged: Record<string, ScheduleItem[]> = { ...weeklySchedule };
+          json.schedule.forEach((s: any) => {
+            if (s.day && Array.isArray(s.anime) && s.anime.length > 0) {
+              merged[s.day] = s.anime.map((a: any) => ({
+                title: a.title,
+                slug: a.slug,
+                img: '',
+                type: 'anime' as const,
+                time: 'Rilis Hari Ini'
+              }));
+            }
+          });
+          setLiveSchedule(merged);
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [countdowns, setCountdowns] = useState<string[]>([]);
   const [animeStatus, setAnimeStatus] = useState<'ALL' | 'Ongoing' | 'Completed'>('ALL');
 
@@ -939,12 +964,22 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
         </div>
         {/* Right side controls: PWA, Surprise Me, Search */}
         <div className="flex items-center gap-3">
-          {isInstallable && (
+          {isInstallable ? (
             <button
               onClick={handleInstallApp}
-              className="hidden lg:flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 px-4 py-2 rounded-full text-xs font-bold text-white shadow-md transition-all hover:scale-105 cursor-pointer"
+              className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 px-3.5 py-1.5 rounded-full text-xs font-bold text-white shadow-md transition-all hover:scale-105 cursor-pointer"
             >
-              📲 Instal Aplikasi
+              📲 Pasang Aplikasi
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                alert("Aylin Stream PWA siap dipasang!\n\nUntuk memasang di Android/iOS:\n1. Buka menu browser (titik 3 di Chrome atau tombol Bagikan di Safari)\n2. Pilih 'Tambahkan ke Layar Utama' (Add to Home screen)\n3. Aplikasi akan muncul di layar HP Anda!");
+              }}
+              className="hidden sm:flex items-center gap-1.5 bg-white/5 hover:bg-white/10 border border-white/5 px-3 py-1.5 rounded-full text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+              title="Pasang aplikasi di layar HP"
+            >
+              📲 Pasang di HP
             </button>
           )}
 
@@ -1446,7 +1481,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
 
         {/* Days Tab Bar */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {Object.keys(weeklySchedule).map((day) => (
+          {Object.keys(liveSchedule).map((day) => (
             <button
               key={day}
               onClick={() => setSelectedScheduleDay(day)}
@@ -1463,7 +1498,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
 
         {/* Schedule Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {selectedScheduleDay && weeklySchedule[selectedScheduleDay]?.map((item) => (
+          {selectedScheduleDay && liveSchedule[selectedScheduleDay]?.map((item) => (
             <Link
               key={item.slug}
               href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}

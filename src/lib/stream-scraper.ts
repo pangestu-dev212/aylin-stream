@@ -16,7 +16,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const OTAKUDESU_BASE = 'https://otakudesu.blog';
 const ANICHIN_BASE = 'https://anichin.moe';
-const JURAGANFILM_BASE = 'https://tv48.juragan.film'; // Active redirect domain
+const JURAGANFILM_BASE = 'https://tv49.juragan.film'; // Active domain
 
 // Simple in-memory cache system for ongoing lists (TTL: 10 minutes)
 interface CacheEntry<T> {
@@ -46,20 +46,74 @@ export function setInCache(key: string, data: any) {
   globalScraperCache.set(key, { data, timestamp: Date.now() });
 }
 
-// Helper to resolve domain via Cloudflare DoH to bypass ISP block
+// In-memory DNS cache to avoid repeated lookups
+const dnsCache = new Map<string, { ip: string; timestamp: number }>();
+const DNS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// Helper to resolve domain via fast DoH (1.1.1.1 + Google DoH fallback) to bypass ISP block
 async function resolveDns(domain: string): Promise<string | null> {
+  const cached = dnsCache.get(domain);
+  if (cached && (Date.now() - cached.timestamp) < DNS_CACHE_TTL_MS) {
+    return cached.ip;
+  }
+
+  // 1. Try Cloudflare 1.1.1.1 directly (fastest and cleanest)
+  try {
+    const res = await fetch(`https://1.1.1.1/dns-query?name=${encodeURIComponent(domain)}&type=A`, {
+      headers: { 'accept': 'application/dns-json' },
+      signal: AbortSignal.timeout(2500)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        const aRecord = data.Answer.find((r: any) => r.type === 1);
+        if (aRecord) {
+          const ip = String(aRecord.data);
+          dnsCache.set(domain, { ip, timestamp: Date.now() });
+          return ip;
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Try Google DoH as fallback
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=A`, {
+      headers: { 'accept': 'application/dns-json' },
+      signal: AbortSignal.timeout(2500)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        const aRecord = data.Answer.find((r: any) => r.type === 1);
+        if (aRecord) {
+          const ip = String(aRecord.data);
+          dnsCache.set(domain, { ip, timestamp: Date.now() });
+          return ip;
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Fallback to cloudflare-dns.com
   try {
     const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=A`, {
-      headers: { 'accept': 'application/dns-json' }
+      headers: { 'accept': 'application/dns-json' },
+      signal: AbortSignal.timeout(2500)
     });
-    const data = await res.json();
-    if (data.Answer && data.Answer.length > 0) {
-      const aRecord = data.Answer.find((r: any) => r.type === 1);
-      if (aRecord) return String(aRecord.data);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        const aRecord = data.Answer.find((r: any) => r.type === 1);
+        if (aRecord) {
+          const ip = String(aRecord.data);
+          dnsCache.set(domain, { ip, timestamp: Date.now() });
+          return ip;
+        }
+      }
     }
-  } catch {
-    // Fail silently
-  }
+  } catch {}
+
   return null;
 }
 
@@ -85,35 +139,54 @@ async function fetchWithDoh(urlStr: string, followCount = 0): Promise<string> {
       method: 'GET',
       headers: {
         'Host': domain,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
       },
       agent: agent
     }, (res) => {
+      // Follow redirects
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
+        const redirectUrl = res.headers.location || '';
+        const absoluteUrl = redirectUrl.startsWith('http') ? redirectUrl : `https://${domain}${redirectUrl}`;
+        
+        // Check if redirect points back to the homepage (WordPress soft-404)
+        try {
+          const redirectParsed = new URL(absoluteUrl);
+          if (redirectParsed.pathname === '/' && parsedUrl.pathname !== '/') {
+            reject(new Error(`Redirected to homepage (soft-404): ${urlStr} -> ${absoluteUrl}`));
+            return;
+          }
+        } catch {}
+
+        try {
+          resolve(fetchWithDoh(absoluteUrl, followCount + 1));
+        } catch (err) {
+          reject(err);
+        }
+        return;
+      }
+
+      if (res.statusCode && res.statusCode >= 400) {
+        reject(new Error(`HTTP error ${res.statusCode} for ${urlStr}`));
+        return;
+      }
+
       let body = '';
       res.on('data', chunk => body += chunk);
       res.on('end', async () => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          const redirectUrl = res.headers.location || '';
-          const absoluteUrl = redirectUrl.startsWith('http') ? redirectUrl : `https://${domain}${redirectUrl}`;
-          
-          // Check if redirect points back to the homepage (WordPress soft-404)
-          try {
-            const redirectParsed = new URL(absoluteUrl);
-            if (redirectParsed.pathname === '/' && parsedUrl.pathname !== '/') {
-              reject(new Error(`Redirected to homepage: ${urlStr} -> ${absoluteUrl}`));
-              return;
-            }
-          } catch {}
-
-          try {
-            resolve(await fetchWithDoh(absoluteUrl, followCount + 1));
-          } catch (err) {
-            reject(err);
-          }
-        } else {
-          resolve(body);
+        // Check if body is an explicit 404 page
+        if (body.includes('<title>Page not found') || body.includes('Halaman tidak ditemukan') || body.includes('<title>404')) {
+          reject(new Error(`Page Not Found: ${urlStr}`));
+          return;
         }
+        resolve(body);
       });
+    });
+
+    req.setTimeout(8000, () => {
+      req.destroy();
+      reject(new Error(`Request timeout for ${urlStr}`));
     });
 
     req.on('error', reject);
@@ -141,12 +214,13 @@ function normalizeUrl(path: string | undefined, base: string): string {
 }
 
 // Request wrapper with custom User-Agent and intelligent DoH bypass
-async function fetchHtml(url: string): Promise<string> {
+export async function fetchHtml(url: string): Promise<string> {
   try {
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      },
+      signal: AbortSignal.timeout(4000)
     });
     if (!res.ok) {
       throw new Error(`Failed to fetch ${url}, status: ${res.status}`);
@@ -167,17 +241,15 @@ async function fetchHtml(url: string): Promise<string> {
     
     // Check if the page is blocked by ISP Safesurf/Internet Positif
     if (html.includes('Safesurf') || html.includes('Internet Positif') || html.includes('Internet Sehat') || html.includes('safesurf')) {
-      console.log(`[ISP BLOCK] Block detected for ${url}. Bypassing using DNS-over-HTTPS...`);
       return await fetchWithDoh(url);
     }
     
     return html;
   } catch (err) {
-    console.log(`[FETCH ERROR] Native fetch failed for ${url}. Falling back to DoH bypass...`);
     try {
       return await fetchWithDoh(url);
     } catch (dohErr) {
-      throw err; // throw original fetch error if DoH also fails
+      throw dohErr;
     }
   }
 }
@@ -428,7 +500,24 @@ export async function getOtakudesuEpisode(slug: string) {
       }
     });
 
-    const result = { title, slug, mirrors };
+    const downloads: { quality: string; size: string; links: { host: string; url: string }[] }[] = [];
+    $('.download ul li').each((i, el) => {
+      const quality = $(el).find('strong').text().trim();
+      const size = $(el).find('i').text().trim();
+      const links: { host: string; url: string }[] = [];
+      $(el).find('a').each((j, a) => {
+        const host = $(a).text().trim();
+        const href = $(a).attr('href');
+        if (host && href) {
+          links.push({ host, url: href });
+        }
+      });
+      if (quality && links.length > 0) {
+        downloads.push({ quality, size, links });
+      }
+    });
+
+    const result = { title, slug, mirrors, downloads };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -889,28 +978,42 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
   if (cached) return cached;
 
   try {
-    // Determine whether to request under /film-seri/ or /film/
-    // Default to /film-seri/ first
-    let url = `${JURAGANFILM_BASE}/film-seri/${slug}/`;
-    let html = '';
-    // Try format 1: /film-seri/slug/
-    try {
-      html = await fetchHtml(`${JURAGANFILM_BASE}/film-seri/${slug}/`);
-    } catch {
-      // Try format 2: /film/slug/
+    // If slug starts with 'nonton-', it is typically a standalone movie
+    const isMovie = slug.startsWith('nonton-') || slug.includes('movie');
+    const candidateUrls = isMovie
+      ? [
+          `${JURAGANFILM_BASE}/${slug}/`,
+          `${JURAGANFILM_BASE}/film/${slug}/`,
+          `${JURAGANFILM_BASE}/film-seri/${slug}/`
+        ]
+      : [
+          `${JURAGANFILM_BASE}/film-seri/${slug}/`,
+          `${JURAGANFILM_BASE}/${slug}/`,
+          `${JURAGANFILM_BASE}/film/${slug}/`
+        ];
+
+    let $: cheerio.CheerioAPI | null = null;
+    let title = '';
+
+    for (const testUrl of candidateUrls) {
       try {
-        html = await fetchHtml(`${JURAGANFILM_BASE}/film/${slug}/`);
-      } catch {
-        // Try format 3: raw /slug/ path (direct root post)
-        html = await fetchHtml(`${JURAGANFILM_BASE}/${slug}/`);
-      }
+        const fetched = await fetchHtml(testUrl);
+        const $test = cheerio.load(fetched);
+        const t = $test('.entry-title, h1').first().text().trim();
+        // Ensure this is a valid detail page and not a 404
+        if (t && !t.toLowerCase().includes('page not found') && !t.toLowerCase().includes('404')) {
+          $ = $test;
+          title = t.replace(/^Nonton\s+(Film\s+)?/i, '').replace(/–\s*JuraganFIlm.*$/i, '').trim();
+          break;
+        }
+      } catch {}
     }
 
-    const $ = cheerio.load(html);
+    if (!$ || !title) {
+      console.warn(`Could not find valid Juraganfilm detail page for slug: ${slug}`);
+      return null;
+    }
 
-    const fullTitle = $('.entry-title').text().trim();
-    const title = fullTitle.replace(/^Nonton\s+(Film\s+)?/i, '').trim();
-    
     // Poster image
     const img = $('.wp-post-image').attr('src') || 
                 $('.aligncenter').attr('src') || 
@@ -944,19 +1047,21 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
       epsWrap.find('a.post-page-numbers').each((i, el) => {
         const epUrl = $(el).attr('href') || '';
         // Extract episode number suffix (e.g. from /slug/2/ -> epSlug = slug/2)
-        const parsedUrl = new URL(epUrl);
-        const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
-        const pageNum = pathSegments[pathSegments.length - 1]; // "2", "3", etc.
-        
-        if (pageNum && !isNaN(Number(pageNum))) {
-          episodes.push({
-            title: `Episode ${pageNum}`,
-            slug: `${slug}/${pageNum}` // relative format
-          });
-        }
+        try {
+          const parsedUrl = new URL(epUrl);
+          const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
+          const pageNum = pathSegments[pathSegments.length - 1]; // "2", "3", etc.
+          
+          if (pageNum && !isNaN(Number(pageNum))) {
+            episodes.push({
+              title: `Episode ${pageNum}`,
+              slug: `${slug}/${pageNum}` // relative format
+            });
+          }
+        } catch {}
       });
     } else {
-      // If no episodes pagination list, this is a standalone Movie (1 part)
+      // Standalone Movie (1 part)
       episodes.push({
         title: 'Putar Film',
         slug: slug
@@ -983,31 +1088,82 @@ export async function getJuraganfilmEpisode(slug: string) {
     const mainSlug = parts[0];
     const pageNum = parts[1] || '';
 
-    let html = '';
-    // Try format 1: /film-seri/slug/page/
-    try {
-      html = await fetchHtml(`${JURAGANFILM_BASE}/film-seri/${mainSlug}/${pageNum ? `${pageNum}/` : ''}`);
-    } catch {
-      // Try format 2: /film/slug/page/
+    const isMovie = mainSlug.startsWith('nonton-') || mainSlug.includes('movie');
+    const candidateUrls = pageNum
+      ? [
+          `${JURAGANFILM_BASE}/film-seri/${mainSlug}/${pageNum}/`,
+          `${JURAGANFILM_BASE}/${mainSlug}/${pageNum}/`,
+          `${JURAGANFILM_BASE}/film/${mainSlug}/${pageNum}/`
+        ]
+      : (isMovie
+          ? [
+              `${JURAGANFILM_BASE}/${mainSlug}/`,
+              `${JURAGANFILM_BASE}/film/${mainSlug}/`,
+              `${JURAGANFILM_BASE}/film-seri/${mainSlug}/`
+            ]
+          : [
+              `${JURAGANFILM_BASE}/film-seri/${mainSlug}/`,
+              `${JURAGANFILM_BASE}/${mainSlug}/`,
+              `${JURAGANFILM_BASE}/film/${mainSlug}/`
+            ]
+        );
+
+    let title = '';
+    let playerSrc = '';
+
+    for (const testUrl of candidateUrls) {
       try {
-        html = await fetchHtml(`${JURAGANFILM_BASE}/film/${mainSlug}/${pageNum ? `${pageNum}/` : ''}`);
-      } catch {
-        // Try format 3: raw /slug/page/
-        html = await fetchHtml(`${JURAGANFILM_BASE}/${mainSlug}/${pageNum ? `${pageNum}/` : ''}`);
+        const fetched = await fetchHtml(testUrl);
+        const $test = cheerio.load(fetched);
+        const src = $test('iframe').attr('src') || $test('iframe').attr('data-src') || '';
+        if (src) {
+          title = $test('.entry-title, h1').first().text().trim();
+          playerSrc = normalizeUrl(src, JURAGANFILM_BASE);
+          break;
+        }
+      } catch {}
+    }
+
+    if (!playerSrc) {
+      console.warn(`No player iframe found for Juraganfilm slug: ${slug}`);
+      return null;
+    }
+
+    const mirrors: any[] = [];
+
+    // If iframe is jf_engine, fetch jf_engine to extract direct SOURCES (MP4/HLS)
+    if (playerSrc.includes('jf_engine')) {
+      try {
+        const jfHtml = await fetchHtml(playerSrc);
+        const sourceMatch = jfHtml.match(/const SOURCES = ([\s\S]*?);/);
+        if (sourceMatch) {
+          const sources = JSON.parse(sourceMatch[1]);
+          if (Array.isArray(sources)) {
+            sources.forEach((s: any, idx: number) => {
+              if (s.link) {
+                mirrors.push({
+                  quality: s.label || 'HD',
+                  playerText: `Server ${s.label || idx + 1}`,
+                  payload: {
+                    src: s.link,
+                    directSrc: s.link
+                  }
+                });
+              }
+            });
+          }
+        }
+      } catch (jfErr) {
+        console.warn('Failed to parse jf_engine direct streams:', jfErr);
       }
     }
 
-    const $ = cheerio.load(html);
-    const title = $('.entry-title').text().trim();
-
-    // Extract player iframe
-    const playerSrc = $('iframe').attr('src') || '';
-
-    const mirrors = playerSrc ? [{
+    // Always include web embed player as option
+    mirrors.push({
       quality: 'HD',
-      playerText: 'Default Server',
+      playerText: 'Web Player (Embed)',
       payload: { src: playerSrc }
-    }] : [];
+    });
 
     const result = { title, slug, mirrors };
     setInCache(cacheKey, result);
@@ -1156,11 +1312,112 @@ export async function getAnichinCatalog(letter: string, page = 1): Promise<{ res
   }
 }
 
+export async function getJuraganfilmCatalog(letter: string = 'ALL', page = 1, genre = ''): Promise<{ results: AnimeCard[], totalPages: number }> {
+  const cacheKey = `juraganfilm:catalog:${letter}:${genre}:${page}`;
+  const cached = getFromCache<{ results: AnimeCard[], totalPages: number }>(cacheKey, 60 * 60 * 1000); // 1 hour
+  if (cached) return cached;
+
+  try {
+    let url = `${JURAGANFILM_BASE}/film-terbaru/${page > 1 ? `page/${page}/` : ''}`;
+    if (genre && genre !== 'ALL') {
+      url = `${JURAGANFILM_BASE}/genre/${encodeURIComponent(genre.toLowerCase())}/${page > 1 ? `page/${page}/` : ''}`;
+    } else if (letter && letter !== 'ALL') {
+      url = `${JURAGANFILM_BASE}/${page > 1 ? `page/${page}/` : ''}?s=${encodeURIComponent(letter)}`;
+    }
+
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+    const results: AnimeCard[] = [];
+
+    $('article').each((i, el) => {
+      const fullTitle = $(el).find('.entry-title a').text().trim() || $(el).find('h2 a').text().trim();
+      const href = $(el).find('.entry-title a').attr('href') || $(el).find('a').first().attr('href') || '';
+      const rawImg = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const epText = $(el).find('.gmr-quality-item').text().trim() || 'SUB INDO';
+      
+      const title = fullTitle.replace(/^Nonton\s+(Film\s+)?/i, '').trim();
+      const slug = extractSlug(href);
+
+      if (title && slug) {
+        results.push({
+          title,
+          slug,
+          url: href,
+          img: rawImg,
+          ep: epText,
+          type: 'drama',
+          source: 'juraganfilm'
+        });
+      }
+    });
+
+    let totalPages = 1;
+    $('.pagination .page-numbers, .page-numbers').each((i, el) => {
+      const pageText = $(el).text().trim().replace(/,/g, '');
+      const pageNum = Number(pageText);
+      if (!isNaN(pageNum) && pageNum > totalPages) {
+        totalPages = pageNum;
+      }
+    });
+
+    const result = { results, totalPages };
+    setInCache(cacheKey, result);
+    return result;
+  } catch (err) {
+    console.error("Error in getJuraganfilmCatalog:", err);
+    return { results: [], totalPages: 1 };
+  }
+}
+
+export interface DaySchedule {
+  day: string;
+  anime: { title: string; slug: string; url: string }[];
+}
+
+export async function getWeeklySchedule(): Promise<DaySchedule[]> {
+  const cacheKey = `stream:weekly_schedule`;
+  const cached = getFromCache<DaySchedule[]>(cacheKey, 2 * 60 * 60 * 1000); // 2 hours
+  if (cached) return cached;
+
+  try {
+    const html = await fetchHtml(`${OTAKUDESU_BASE}/jadwal-rilis/`);
+    const $ = cheerio.load(html);
+    const schedule: DaySchedule[] = [];
+
+    $('.kglist321').each((i, el) => {
+      const day = $(el).find('h2').text().trim();
+      const animeList: { title: string; slug: string; url: string }[] = [];
+
+      $(el).find('ul li a').each((j, a) => {
+        const title = $(a).text().trim();
+        const href = $(a).attr('href') || '';
+        const slug = extractSlug(href);
+        if (title && slug) {
+          animeList.push({ title, slug, url: href });
+        }
+      });
+
+      if (day && animeList.length > 0) {
+        schedule.push({ day, anime: animeList });
+      }
+    });
+
+    if (schedule.length > 0) {
+      setInCache(cacheKey, schedule);
+      return schedule;
+    }
+    return [];
+  } catch (err) {
+    console.error("Error in getWeeklySchedule:", err);
+    return [];
+  }
+}
+
 // ==========================================
 // SAMEHADAKU SCRAPER (ALTERNATIVE ANIME)
 // ==========================================
 
-const SAMEHADAKU_BASE = 'https://v2.samehadaku.how';
+const SAMEHADAKU_BASE = 'https://samehadaku.video';
 
 let samehadakuOngoingCache: { data: AnimeCard[]; timestamp: number } | null = null;
 
@@ -1171,49 +1428,54 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
   }
 
   try {
-    const html = await fetchHtml(`${SAMEHADAKU_BASE}/ongoing-anime/`);
+    let html = '';
+    try {
+      html = await fetchHtml(`${SAMEHADAKU_BASE}/anime-terbaru-pgddvcs/`);
+    } catch {
+      try {
+        html = await fetchHtml(`${SAMEHADAKU_BASE}/ongoing-brs4kyi/`);
+      } catch {
+        html = await fetchHtml(`${SAMEHADAKU_BASE}/`);
+      }
+    }
+
     const $ = cheerio.load(html);
     const ongoing: AnimeCard[] = [];
 
-    // Samehadaku uses .animepost or .bs .bsx structure
-    $('.animepost, .bs .bsx, .listupd .bs').each((i, el) => {
-      const title = $(el).find('.tt, .ntitle, h4, h3').first().text().trim();
-      const href = $(el).find('a').first().attr('href') || '';
-      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
-      const ep = $(el).find('.epx, .ep').text().trim();
+    // Parse modern samehadaku post-show items & cards
+    $('ul li, .post-item, article, .sw-eps-isi').each((i, el) => {
+      const parent = $(el).closest('li').length ? $(el).closest('li') : $(el);
+      const title = parent.find('.sw-eps-judul a, h2 a, h3 a, .title a, .entry-title a').first().text().trim() ||
+                    parent.find('.sw-eps-judul, .title, .entry-title').first().text().trim();
+      const href = parent.find('a[href*="/nonton/"]').first().attr('href') || parent.find('a').first().attr('href') || '';
+      const img = parent.find('img').attr('src') || parent.find('img').attr('data-src') || '';
+      const thumbTitle = parent.find('a.sw-eps-thumb').attr('title') || parent.find('a').first().attr('title') || '';
+      const epMatch = (thumbTitle + ' ' + title).match(/Episode\s+\d+/i);
+      const ep = epMatch ? epMatch[0] : (parent.find('.ep, .epx, .sw-eps-baris').text().trim() || 'Ongoing');
       const slug = extractSlug(href);
 
-      if (title && slug) {
-        ongoing.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime', source: 'samehadaku' });
+      if (title && slug && href.includes('samehadaku.video')) {
+        ongoing.push({
+          title,
+          slug,
+          url: href,
+          img: normalizeUrl(img, SAMEHADAKU_BASE),
+          ep,
+          type: 'anime',
+          source: 'samehadaku'
+        });
       }
     });
 
-    if (ongoing.length > 0) {
-      samehadakuOngoingCache = { data: ongoing, timestamp: now };
-      return ongoing;
+    // Deduplicate by slug
+    const uniqueOngoing = [...new Map(ongoing.map(item => [item.slug, item])).values()];
+
+    if (uniqueOngoing.length > 0) {
+      samehadakuOngoingCache = { data: uniqueOngoing, timestamp: now };
+      return uniqueOngoing;
     }
 
-    // Fallback: try homepage
-    const homeHtml = await fetchHtml(`${SAMEHADAKU_BASE}/`);
-    const $home = cheerio.load(homeHtml);
-    const homeList: AnimeCard[] = [];
-
-    $home('.animepost, .bs .bsx, .listupd .bs, .releases .rl-left .data').each((i, el) => {
-      const title = $home(el).find('.tt, .ntitle, h4, h3').first().text().trim();
-      const href = $home(el).find('a').first().attr('href') || '';
-      const img = $home(el).find('img').attr('src') || $home(el).find('img').attr('data-src') || '';
-      const ep = $home(el).find('.epx, .ep').text().trim();
-      const slug = extractSlug(href);
-
-      if (title && slug) {
-        homeList.push({ title, slug, url: href, img: normalizeUrl(img, SAMEHADAKU_BASE), ep, type: 'anime', source: 'samehadaku' });
-      }
-    });
-
-    if (homeList.length > 0) {
-      samehadakuOngoingCache = { data: homeList, timestamp: now };
-    }
-    return homeList;
+    return samehadakuOngoingCache ? samehadakuOngoingCache.data : [];
   } catch (err) {
     console.error('Error in getSamehadakuOngoing:', err);
     return samehadakuOngoingCache ? samehadakuOngoingCache.data : [];
@@ -1226,14 +1488,52 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
   if (cached) return cached;
 
   try {
-    const url = `${SAMEHADAKU_BASE}/anime/${slug}/`;
-    const html = await fetchHtml(url);
-    const $ = cheerio.load(html);
+    let seriesSlug = slug;
+    let html = '';
+    let $: cheerio.CheerioAPI | null = null;
 
-    const title = $('.entry-title').text().replace(/Sub\s+Indo/i, '').replace(/Nonton\s+Anime\s+/i, '').trim();
-    const rawImg = $('.thumb img').attr('src') || $('.info-content img').attr('src') || '';
+    // Check if the slug is an episode slug (e.g. contains '-episode-' or was opened from latest releases)
+    const isEpisodeSlug = slug.includes('-episode-') || slug.startsWith('nonton-');
+    if (isEpisodeSlug) {
+      try {
+        const epHtml = await fetchHtml(`${SAMEHADAKU_BASE}/nonton/${slug}/`);
+        const $ep = cheerio.load(epHtml);
+        const parentAnimeHref = $ep('a[href*="/anime/"]').first().attr('href');
+        if (parentAnimeHref) {
+          seriesSlug = extractSlug(parentAnimeHref);
+        }
+      } catch {}
+    }
+
+    // Fetch the series detail page
+    const candidateUrls = [
+      `${SAMEHADAKU_BASE}/anime/${seriesSlug}/`,
+      `${SAMEHADAKU_BASE}/nonton/${slug}/`,
+      `${SAMEHADAKU_BASE}/${slug}/`
+    ];
+
+    for (const testUrl of candidateUrls) {
+      try {
+        const fetched = await fetchHtml(testUrl);
+        const $test = cheerio.load(fetched);
+        const t = $test('.entry-title, h1').first().text().trim();
+        if (t && !t.toLowerCase().includes('page not found') && !t.toLowerCase().includes('404')) {
+          html = fetched;
+          $ = $test;
+          break;
+        }
+      } catch {}
+    }
+
+    if (!$ || !html) {
+      return null;
+    }
+
+    const rawTitle = $('.entry-title, h1').first().text().trim();
+    const title = rawTitle.replace(/Sub\s+Indo/i, '').replace(/Nonton\s+Anime\s+/i, '').trim();
+    const rawImg = $('.thumb img').attr('src') || $('.info-content img').attr('src') || $('img.sw-poster-gbr').attr('src') || $('img').first().attr('src') || '';
     const img = normalizeUrl(rawImg, SAMEHADAKU_BASE);
-    const synopsis = $('.entry-content p, .desc p').text().trim() || $('.entry-content, .desc').text().trim();
+    const synopsis = $('.entry-content p, .desc p, .desc').text().trim() || $('.entry-content').text().trim() || 'Tidak ada sinopsis.';
 
     const details: string[] = [];
     $('.info-content .spe span, .spe span').each((i, el) => {
@@ -1242,32 +1542,24 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
 
     const episodes: EpisodeLink[] = [];
     
-    // Format A: listeps (for multi-episode Series)
-    if ($('.listeps ul li').length > 0) {
-      $('.listeps ul li').each((i, el) => {
-        const epTitle = $(el).find('.epsleft .lchx a').text().trim();
-        const epUrl = $(el).find('.epsleft .lchx a').attr('href') || '';
-        const epDate = $(el).find('.epsleft .date').text().trim();
-        const epSlug = extractSlug(epUrl);
-        if (epTitle && epSlug) {
-          episodes.push({ title: epTitle, slug: epSlug, date: epDate });
-        }
-      });
-    } 
-    // Format B: eplister (for Special/Movies or standard list)
-    else if ($('.eplister ul li').length > 0) {
-      $('.eplister ul li').each((i, el) => {
-        const epTitle = $(el).find('.epl-title').text().trim() || $(el).find('a').text().trim();
-        const epUrl = $(el).find('a').attr('href') || '';
-        const epDate = $(el).find('.epl-date').text().trim();
-        const epSlug = extractSlug(epUrl);
-        if (epTitle && epSlug) {
-          episodes.push({ title: epTitle, slug: epSlug, date: epDate });
-        }
-      });
+    // Extract all episodes (Samehadaku uses a[href*="/nonton/"] or .lchx a or .eplister)
+    $('a[href*="/nonton/"]').each((i, el) => {
+      const epUrl = $(el).attr('href') || '';
+      const epText = $(el).text().trim();
+      const epSlug = extractSlug(epUrl);
+      const epMatch = epText.match(/Episode\s+\d+/i);
+      const displayTitle = epMatch ? epMatch[0] : (epText || `Episode`);
+      if (epSlug && !episodes.some(e => e.slug === epSlug)) {
+        episodes.push({ title: displayTitle, slug: epSlug });
+      }
+    });
+
+    // Fallback: if no episodes were found, add current episode as playable
+    if (episodes.length === 0) {
+      episodes.push({ title: 'Tonton Episode', slug });
     }
 
-    const result: AnimeDetail = { title, slug, img, synopsis, details, episodes, type: 'anime' };
+    const result: AnimeDetail = { title, slug: seriesSlug, img, synopsis, details, episodes, type: 'anime' };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -1282,16 +1574,39 @@ export async function getSamehadakuEpisode(slug: string) {
   if (cached) return cached;
 
   try {
-    const url = `${SAMEHADAKU_BASE}/${slug}/`;
-    const html = await fetchHtml(url);
-    const $ = cheerio.load(html);
+    let html = '';
+    const candidateUrls = [
+      `${SAMEHADAKU_BASE}/nonton/${slug}/`,
+      `${SAMEHADAKU_BASE}/${slug}/`
+    ];
 
-    const title = $('.entry-title, h1').text().trim();
+    for (const testUrl of candidateUrls) {
+      try {
+        html = await fetchHtml(testUrl);
+        if (html && !html.includes('Page not found')) break;
+      } catch {}
+    }
+
+    if (!html) return null;
+
+    const $ = cheerio.load(html);
+    const title = $('.entry-title, h1').first().text().trim();
     const mirrors: any[] = [];
 
-    // Samehadaku uses .east_player_option elements
+    // 1. Direct iframe player in page (e.g. putarin.biz, etc.)
+    const defaultSrc = $('iframe').attr('src') || $('iframe').attr('data-src') || '';
+    if (defaultSrc) {
+      const normalizedDefault = normalizeUrl(defaultSrc, SAMEHADAKU_BASE);
+      mirrors.push({
+        quality: 'HD',
+        playerText: 'Default Server',
+        payload: { src: normalizedDefault }
+      });
+    }
+
+    // 2. Samehadaku .east_player_option elements (ajax mirrors)
     const optionPromises: Promise<void>[] = [];
-    $('.east_player_option').each((i, el) => {
+    $('.east_player_option, #server ul li, .server_option').each((i, el) => {
       const post = $(el).attr('data-post');
       const nume = $(el).attr('data-nume');
       const type = $(el).attr('data-type');
@@ -1306,8 +1621,8 @@ export async function getSamehadakuEpisode(slug: string) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Referer': url,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Referer': `${SAMEHADAKU_BASE}/nonton/${slug}/`,
               'X-Requested-With': 'XMLHttpRequest'
             },
             body: new URLSearchParams({
@@ -1315,7 +1630,8 @@ export async function getSamehadakuEpisode(slug: string) {
               post: post,
               nume: nume,
               type: type
-            }).toString()
+            }).toString(),
+            signal: AbortSignal.timeout(5000)
           });
 
           if (res.ok) {
@@ -1324,17 +1640,14 @@ export async function getSamehadakuEpisode(slug: string) {
             let iframeSrc = $iframe('iframe').attr('src') || '';
             if (iframeSrc) {
               iframeSrc = normalizeUrl(iframeSrc, SAMEHADAKU_BASE);
-              const directSrc = await extractDirectVideoSrc(iframeSrc);
               mirrors.push({
                 quality: 'HD',
                 playerText: text,
-                payload: { src: iframeSrc, directSrc: directSrc || null }
+                payload: { src: iframeSrc }
               });
             }
           }
-        } catch (e) {
-          // Ignore mirror errors
-        }
+        } catch {}
       })());
     });
 
@@ -1360,11 +1673,11 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
-    $('.animpost, .animepost').each((i, el) => {
-      const title = $(el).find('.animposx .data .title h2').text().trim() || $(el).find('.animposx a').attr('title') || '';
-      const url = $(el).find('.animposx a').attr('href') || '';
-      const img = $(el).find('.animposx img').attr('src') || '';
-      const ep = $(el).find('.animposx .type').first().text().trim() || '';
+    $('.animpost, .animepost, article').each((i, el) => {
+      const title = $(el).find('.animposx .data .title h2, h2 a, h3 a, .title a').first().text().trim() || $(el).find('.animposx a').attr('title') || '';
+      const url = $(el).find('a').first().attr('href') || '';
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const ep = $(el).find('.animposx .type, .epx, .ep').first().text().trim() || '';
       const slug = extractSlug(url);
 
       if (title && slug) {

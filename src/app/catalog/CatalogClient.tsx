@@ -10,7 +10,10 @@ import {
   Home, 
   Sparkles, 
   ChevronLeft, 
-  Loader2 
+  Loader2,
+  Tv,
+  Clapperboard,
+  Filter
 } from 'lucide-react';
 
 interface AnimeCard {
@@ -19,6 +22,7 @@ interface AnimeCard {
   url: string;
   img: string;
   type: 'anime' | 'donghua' | 'drama';
+  ep?: string;
 }
 
 const ALPHABET = [
@@ -26,9 +30,24 @@ const ALPHABET = [
   'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'
 ];
 
+const GENRES = [
+  'ALL',
+  'Action',
+  'Romance',
+  'Comedy',
+  'Sci-Fi',
+  'Fantasy',
+  'Horror',
+  'Thriller',
+  'Wuxia',
+  'Drama'
+];
+
 export default function CatalogClient() {
-  const [selectedType, setSelectedType] = useState<'anime' | 'donghua'>('anime');
+  const [selectedType, setSelectedType] = useState<'anime' | 'donghua' | 'drama'>('anime');
   const [selectedLetter, setSelectedLetter] = useState<string>('A');
+  const [selectedGenre, setSelectedGenre] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<'ALL' | 'Ongoing' | 'Completed'>('ALL');
   const [page, setPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [items, setItems] = useState<AnimeCard[]>([]);
@@ -42,13 +61,19 @@ export default function CatalogClient() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/catalog?type=${selectedType}&letter=${encodeURIComponent(selectedLetter)}&page=${page}`);
+        const genreParam = selectedGenre !== 'ALL' ? `&genre=${encodeURIComponent(selectedGenre.toLowerCase())}` : '';
+        const res = await fetch(`/api/catalog?type=${selectedType}&letter=${encodeURIComponent(selectedLetter)}&page=${page}${genreParam}`);
         if (!res.ok) {
           throw new Error('Gagal mengambil data katalog.');
         }
         const data = await res.json();
         if (data.success) {
-          setItems(data.results || []);
+          // Normalize type if from drama
+          const mapped = (data.results || []).map((item: any) => ({
+            ...item,
+            type: selectedType
+          }));
+          setItems(mapped);
           setTotalPages(data.totalPages || 1);
         } else {
           throw new Error(data.error || 'Terjadi kesalahan sistem.');
@@ -60,12 +85,14 @@ export default function CatalogClient() {
       }
     }
     fetchCatalog();
-  }, [selectedType, selectedLetter, page]);
+  }, [selectedType, selectedLetter, selectedGenre, page]);
 
   // Reset page when switching tabs or letters
-  const handleTypeChange = (type: 'anime' | 'donghua') => {
+  const handleTypeChange = (type: 'anime' | 'donghua' | 'drama') => {
     setSelectedType(type);
     setSelectedLetter('A');
+    setSelectedGenre('ALL');
+    setSelectedStatus('ALL');
     setPage(1);
     setFilterQuery('');
   };
@@ -76,26 +103,46 @@ export default function CatalogClient() {
     setFilterQuery('');
   };
 
-  // Filter items matching search input
-  const filteredItems = items.filter(item => 
-    item.title.toLowerCase().includes(filterQuery.toLowerCase())
-  );
+  const handleGenreChange = (genre: string) => {
+    setSelectedGenre(genre);
+    setPage(1);
+  };
+
+  // Filter items matching search input and client-side status
+  const filteredItems = items.filter(item => {
+    const matchesSearch = item.title.toLowerCase().includes(filterQuery.toLowerCase());
+    if (!matchesSearch) return false;
+
+    if (selectedStatus !== 'ALL') {
+      const titleLower = item.title.toLowerCase();
+      const isCompleted = titleLower.includes('tamat') || titleLower.includes('complete') || titleLower.includes('movie') || titleLower.includes('season 1') || titleLower.includes('season 2');
+      if (selectedStatus === 'Completed' && !isCompleted) return false;
+      if (selectedStatus === 'Ongoing' && isCompleted) return false;
+    }
+
+    return true;
+  });
 
   // Play random content redirect handler
-  const handlePlayRandom = async () => {
-    try {
-      const res = await fetch('/api/search?q=random');
-      // For random, we can fallback to homepage items or just pick from current catalog items list
-      if (filteredItems.length > 0) {
-        const randomItem = filteredItems[Math.floor(Math.random() * filteredItems.length)];
-        window.location.href = `/watch/${randomItem.type}/${randomItem.slug}`;
-      } else {
-        // Fallback randomizer from server if catalog is empty
-        window.location.href = '/';
-      }
-    } catch {
+  const handlePlayRandom = () => {
+    if (filteredItems.length > 0) {
+      const randomItem = filteredItems[Math.floor(Math.random() * filteredItems.length)];
+      window.location.href = `/watch/${randomItem.type}/${randomItem.slug}`;
+    } else {
       window.location.href = '/';
     }
+  };
+
+  const getThemeTabColor = () => {
+    if (selectedType === 'anime') return 'bg-violet-500 text-white shadow-lg glow-purple';
+    if (selectedType === 'donghua') return 'bg-fuchsia-500 text-white shadow-lg glow-fuchsia';
+    return 'bg-amber-500 text-white shadow-lg';
+  };
+
+  const getActiveLetterBg = () => {
+    if (selectedType === 'anime') return 'bg-violet-500 text-white shadow-md';
+    if (selectedType === 'donghua') return 'bg-fuchsia-500 text-white shadow-md';
+    return 'bg-amber-500 text-white shadow-md';
   };
 
   return (
@@ -124,17 +171,17 @@ export default function CatalogClient() {
         </div>
       </header>
 
-      {/* 2. Main Page Container */}
+      {/* 2. Main Container */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 flex flex-col gap-6">
         
         {/* Title and Intro */}
         <div className="flex flex-col gap-1.5">
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2.5">
             <Film size={26} className="text-violet-500" />
-            Katalog A-Z
+            Katalog A-Z &amp; Filter
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 max-w-2xl leading-relaxed">
-            Jelajahi ribuan judul Anime Jepang dan Donghua China sub Indo. Klik pada tab untuk beralih tipe tayangan, pilih huruf abjad untuk memfilter indeks, dan ketik judul di pencarian cepat.
+            Jelajahi ribuan judul Anime Jepang, Donghua China, dan Movie/Film Barat &amp; Asia sub Indo. Klik pada tab untuk beralih tipe tayangan, pilih huruf abjad untuk memfilter indeks, dan gunakan filter genre untuk menemukan film favorit Anda.
           </p>
         </div>
 
@@ -142,10 +189,10 @@ export default function CatalogClient() {
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 mt-2">
           
           {/* Tabs */}
-          <div className="flex items-center p-1 bg-slate-900/50 border border-slate-900 rounded-full w-fit">
+          <div className="flex flex-wrap items-center p-1 bg-slate-900/50 border border-slate-900 rounded-2xl sm:rounded-full w-fit gap-1">
             <button
               onClick={() => handleTypeChange('anime')}
-              className={`px-5 py-2 text-xs font-black rounded-full transition-all cursor-pointer ${
+              className={`px-4 sm:px-5 py-2 text-xs font-black rounded-xl sm:rounded-full transition-all cursor-pointer ${
                 selectedType === 'anime' 
                   ? 'bg-violet-500 text-white shadow-lg glow-purple' 
                   : 'text-slate-400 hover:text-slate-200'
@@ -155,13 +202,23 @@ export default function CatalogClient() {
             </button>
             <button
               onClick={() => handleTypeChange('donghua')}
-              className={`px-5 py-2 text-xs font-black rounded-full transition-all cursor-pointer ${
+              className={`px-4 sm:px-5 py-2 text-xs font-black rounded-xl sm:rounded-full transition-all cursor-pointer ${
                 selectedType === 'donghua' 
                   ? 'bg-fuchsia-500 text-white shadow-lg glow-fuchsia' 
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               🇨🇳 Donghua China
+            </button>
+            <button
+              onClick={() => handleTypeChange('drama')}
+              className={`px-4 sm:px-5 py-2 text-xs font-black rounded-xl sm:rounded-full transition-all cursor-pointer ${
+                selectedType === 'drama' 
+                  ? 'bg-amber-500 text-white shadow-lg' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🎬 Movie &amp; Drama
             </button>
           </div>
 
@@ -188,13 +245,50 @@ export default function CatalogClient() {
                 onClick={() => handleLetterChange(letter)}
                 className={`w-9 h-9 flex items-center justify-center text-xs font-black rounded-xl transition-all cursor-pointer ${
                   selectedLetter === letter
-                    ? selectedType === 'anime'
-                      ? 'bg-violet-500 text-white shadow-md'
-                      : 'bg-fuchsia-500 text-white shadow-md'
+                    ? getActiveLetterBg()
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                 }`}
               >
                 {letter}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 3.5 Genre & Status Filter Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-900/40 border border-white/5 rounded-2xl">
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1 mr-1">
+              <Filter size={12} /> Genre:
+            </span>
+            {GENRES.map((g) => (
+              <button
+                key={g}
+                onClick={() => handleGenreChange(g)}
+                className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  selectedGenre === g
+                    ? 'bg-violet-600 text-white shadow-md'
+                    : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                }`}
+              >
+                {g === 'ALL' ? 'Semua Genre' : g}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs font-bold">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">Status:</span>
+            {(['ALL', 'Ongoing', 'Completed'] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setSelectedStatus(st)}
+                className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                  selectedStatus === st
+                    ? 'bg-fuchsia-600 text-white shadow-md'
+                    : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                }`}
+              >
+                {st === 'ALL' ? 'Semua' : st}
               </button>
             ))}
           </div>
@@ -215,7 +309,7 @@ export default function CatalogClient() {
           <div className="flex flex-col items-center justify-center py-20 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-3xl gap-2 text-center px-4">
             <Film size={36} className="text-slate-700 mb-1" />
             <p className="text-sm font-bold text-slate-400">Katalog Kosong</p>
-            <p className="text-xs text-slate-500 max-w-md">Tidak ada tayangan yang berawalan huruf &quot;{selectedLetter}&quot; atau sesuai dengan pencarian cepat Anda.</p>
+            <p className="text-xs text-slate-500 max-w-md">Tidak ada tayangan yang berawalan huruf &quot;{selectedLetter}&quot; atau sesuai dengan filter pilihan Anda.</p>
           </div>
         ) : (
           <div className="flex flex-col gap-8">
@@ -227,7 +321,11 @@ export default function CatalogClient() {
                   <div 
                     key={`catalog-${item.slug}-${idx}`}
                     className={`group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 border border-white/5 hover:border-slate-800 ${
-                      selectedType === 'anime' ? 'hover:border-violet-500/20' : 'hover:border-fuchsia-500/20'
+                      selectedType === 'anime' 
+                        ? 'hover:border-violet-500/20' 
+                        : selectedType === 'donghua'
+                        ? 'hover:border-fuchsia-500/20'
+                        : 'hover:border-amber-500/20'
                     }`}
                   >
                     <Link href={watchPath} className="relative aspect-[3/4] overflow-hidden bg-slate-950 flex items-center justify-center">
@@ -243,18 +341,22 @@ export default function CatalogClient() {
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
-                              selectedType === 'anime' ? 'bg-violet-500 glow-purple' : 'bg-fuchsia-500 glow-fuchsia'
+                              selectedType === 'anime' 
+                                ? 'bg-violet-500 glow-purple' 
+                                : selectedType === 'donghua'
+                                ? 'bg-fuchsia-500 glow-fuchsia'
+                                : 'bg-amber-500'
                             }`}>
                               <Play size={16} fill="white" className="ml-0.5" />
                             </div>
                           </div>
                         </>
                       ) : (
-                        // Placeholder premium card for text directory without images (Anime List)
+                        // Placeholder card for text directory without images
                         <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-900 to-slate-950 flex flex-col justify-between p-4 border border-white/5">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] uppercase font-black text-violet-400 tracking-widest px-2 py-0.5 rounded bg-violet-500/10 border border-violet-500/10">
-                              Anime
+                              {selectedType === 'anime' ? 'Anime' : selectedType === 'donghua' ? 'Donghua' : 'Movie'}
                             </span>
                             <Film size={14} className="text-slate-700" />
                           </div>
@@ -270,6 +372,13 @@ export default function CatalogClient() {
                           </div>
                         </div>
                       )}
+
+                      {/* Episode Badge if present */}
+                      {item.ep && (
+                        <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/75 backdrop-blur-md rounded-md text-[9px] font-black text-amber-300 border border-amber-500/20 shadow-md">
+                          {item.ep}
+                        </div>
+                      )}
                     </Link>
 
                     {/* Metadata Card Footer */}
@@ -277,7 +386,11 @@ export default function CatalogClient() {
                       <Link 
                         href={watchPath} 
                         className={`font-bold text-xs sm:text-sm text-slate-200 line-clamp-2 leading-snug transition-colors ${
-                          selectedType === 'anime' ? 'group-hover:text-violet-400' : 'group-hover:text-fuchsia-400'
+                          selectedType === 'anime' 
+                            ? 'group-hover:text-violet-400' 
+                            : selectedType === 'donghua'
+                            ? 'group-hover:text-fuchsia-400'
+                            : 'group-hover:text-amber-400'
                         }`}
                       >
                         {item.title}
@@ -289,8 +402,8 @@ export default function CatalogClient() {
               })}
             </div>
 
-            {/* 5. Pagination Controls (Only for Donghua/Anichin since Otakudesu loads all at once) */}
-            {selectedType === 'donghua' && totalPages > 1 && (
+            {/* 5. Pagination Controls (For Donghua & Drama) */}
+            {(selectedType === 'donghua' || selectedType === 'drama') && totalPages > 1 && (
               <div className="flex items-center justify-center gap-4 mt-4 pt-6 border-t border-slate-900">
                 <button
                   disabled={page <= 1}
@@ -323,7 +436,7 @@ export default function CatalogClient() {
       <footer className="mt-24 border-t border-slate-900 py-8 px-4 sm:px-8 text-center text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-4 w-full max-w-7xl mx-auto">
         <p>© 2026 Aylin Stream. All Rights Reserved.</p>
         <p className="flex items-center gap-1 text-slate-400">
-          Nonton Anime &amp; Donghua Lengkap Gratis Tanpa Iklan
+          Nonton Anime, Donghua &amp; Film Bioskop Lengkap Sub Indo
         </p>
       </footer>
 

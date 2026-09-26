@@ -1,27 +1,25 @@
-import { getJikanOngoingAnime, getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing } from '@/lib/stream-scraper';
+import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing, getJikanOngoingAnime } from '@/lib/stream-scraper';
 import DashboardClient from './components/DashboardClient';
 
-// Enable layout/page caching to serve static pages and revalidate in the background every 5 minutes (ISR)
-export const revalidate = 300;
+// Revalidate every 3 minutes so fresh episodes appear promptly
+export const revalidate = 180;
 
 export default async function Home() {
-  // Fetch all data sources in parallel
-  // Jikan API (MyAnimeList) = primary anime source, always accessible globally from any server
-  // Samehadaku & Otakudesu = fallbacks (Indonesian sites, may be geo-restricted from Vercel)
-  const [rawJikan, rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama] = await Promise.all([
-    getJikanOngoingAnime().catch(() => []),
+  // Fetch all live data sources in parallel
+  const [rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama, rawJikan] = await Promise.all([
     getSamehadakuOngoing().catch(() => []),
     getOtakudesuOngoing().catch(() => []),
     getAnichinOngoing().catch(() => []),
-    getJuraganfilmOngoing().catch(() => [])
+    getJuraganfilmOngoing().catch(() => []),
+    getJikanOngoingAnime().catch(() => [])
   ]);
 
-  // Priority: Jikan (MAL) → Samehadaku → Otakudesu
-  const rawAnime = rawJikan.length > 0
-    ? rawJikan
-    : rawSamehadaku.length > 0
-      ? rawSamehadaku
-      : rawOtakudesu;
+  // Priority: Fresh sub Indo releases (Samehadaku → Otakudesu) → fallback global AniList
+  const rawAnime = rawSamehadaku.length > 0
+    ? rawSamehadaku
+    : rawOtakudesu.length > 0
+      ? rawOtakudesu
+      : rawJikan;
 
   // Deduplicate by slug to prevent React duplicate key warning
   const ongoingAnime = [...new Map(rawAnime.map(item => [item.slug, item])).values()];

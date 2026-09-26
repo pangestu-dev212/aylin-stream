@@ -1,10 +1,12 @@
 import { Metadata } from 'next';
 import { 
   getOtakudesuDetail, 
+  getOtakudesuSearch,
   getAnichinDetail, 
   getJuraganfilmDetail,
   getAnimeXinDetail,
   getSamehadakuDetail,
+  getSamehadakuSearch,
   getDonghuastreamDetail
 } from '@/lib/stream-scraper';
 import WatchClient from './WatchClient';
@@ -23,21 +25,62 @@ interface PageProps {
   }>;
 }
 
+async function fetchDetail(type: string, slug: string, source?: string) {
+  // 1. External AniList/Jikan slug
+  if (slug.startsWith('anilist-') || slug.startsWith('jikan-')) {
+    const searchTitle = slug.replace(/^(anilist|jikan)-\d+-/, '').replace(/-/g, ' ').trim();
+    const [sameSearch, otakuSearch] = await Promise.all([
+      getSamehadakuSearch(searchTitle).catch(() => []),
+      getOtakudesuSearch(searchTitle).catch(() => [])
+    ]);
+
+    if (sameSearch.length > 0) {
+      const d = await getSamehadakuDetail(sameSearch[0].slug).catch(() => null);
+      if (d) return { data: d, resolvedSource: 'samehadaku' };
+    }
+    if (otakuSearch.length > 0) {
+      const d = await getOtakudesuDetail(otakuSearch[0].slug).catch(() => null);
+      if (d) return { data: d, resolvedSource: 'otakudesu' };
+    }
+  }
+
+  // 2. Specific source requested
+  if (source === 'samehadaku') {
+    const d = await getSamehadakuDetail(slug).catch(() => null);
+    if (d) return { data: d, resolvedSource: 'samehadaku' };
+    // fallback to otakudesu
+    const d2 = await getOtakudesuDetail(slug).catch(() => null);
+    if (d2) return { data: d2, resolvedSource: 'otakudesu' };
+  } else if (source === 'animexin') {
+    const d = await getAnimeXinDetail(slug).catch(() => null);
+    if (d) return { data: d, resolvedSource: 'animexin' };
+  } else if (source === 'donghuastream') {
+    const d = await getDonghuastreamDetail(slug).catch(() => null);
+    if (d) return { data: d, resolvedSource: 'donghuastream' };
+  } else if (type === 'drama') {
+    const d = await getJuraganfilmDetail(slug).catch(() => null);
+    if (d) return { data: d, resolvedSource: 'juraganfilm' };
+  } else if (type === 'donghua') {
+    const d = await getAnichinDetail(slug).catch(() => null);
+    if (d) return { data: d, resolvedSource: 'anichin' };
+    const alt = await getAnimeXinDetail(slug).catch(() => null);
+    if (alt) return { data: alt, resolvedSource: 'animexin' };
+  } else {
+    // anime default: try Samehadaku then Otakudesu
+    const dSame = await getSamehadakuDetail(slug).catch(() => null);
+    if (dSame) return { data: dSame, resolvedSource: 'samehadaku' };
+    const dOtaku = await getOtakudesuDetail(slug).catch(() => null);
+    if (dOtaku) return { data: dOtaku, resolvedSource: 'otakudesu' };
+  }
+
+  return { data: null, resolvedSource: source };
+}
+
 export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const { type, slug } = await params;
   const { source } = await searchParams;
 
-  const data = source === 'animexin'
-    ? await getAnimeXinDetail(slug)
-    : source === 'samehadaku'
-      ? await getSamehadakuDetail(slug)
-      : source === 'donghuastream'
-        ? await getDonghuastreamDetail(slug)
-        : type === 'drama'
-          ? await getJuraganfilmDetail(slug)
-          : type === 'donghua' 
-            ? await getAnichinDetail(slug) 
-            : await getOtakudesuDetail(slug);
+  const { data } = await fetchDetail(type, slug, source);
      
   return {
     title: data ? `Nonton ${data.title} Subtitle Indonesia - Aylin Stream` : 'Nonton Anime & Donghua - Aylin Stream',
@@ -49,18 +92,7 @@ export default async function WatchPage({ params, searchParams }: PageProps) {
   const { type, slug } = await params;
   const { source } = await searchParams;
   
-  // Fetch details based on type or source override
-  const data = source === 'animexin'
-    ? await getAnimeXinDetail(slug)
-    : source === 'samehadaku'
-      ? await getSamehadakuDetail(slug)
-      : source === 'donghuastream'
-        ? await getDonghuastreamDetail(slug)
-        : type === 'drama'
-          ? await getJuraganfilmDetail(slug)
-          : type === 'donghua' 
-            ? await getAnichinDetail(slug) 
-            : await getOtakudesuDetail(slug);
+  const { data, resolvedSource } = await fetchDetail(type, slug, source);
 
   if (!data) {
     return (
@@ -81,7 +113,7 @@ export default async function WatchPage({ params, searchParams }: PageProps) {
       initialData={parsedData} 
       type={type} 
       slug={slug} 
-      initialSource={source}
+      initialSource={resolvedSource}
     />
   );
 }
