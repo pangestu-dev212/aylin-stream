@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing, getAnimeXinOngoing } from '@/lib/stream-scraper';
+import { getOtakudesuOngoing, getSamehadakuOngoing, getAnichinOngoing, getJuraganfilmOngoing, getAnimeXinOngoing } from '@/lib/stream-scraper';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,7 +16,10 @@ export async function GET(req: NextRequest) {
       const rawDrama = await getJuraganfilmOngoing().catch(() => []);
       results = rawDrama.map(item => ({ ...item, type: 'drama' as const }));
     } else {
-      results = await getOtakudesuOngoing().catch(() => []);
+      results = await getSamehadakuOngoing().catch(() => []);
+      if (!results || results.length === 0) {
+        results = await getOtakudesuOngoing().catch(() => []);
+      }
     }
 
     // Return the top 8 popular/ongoing items for recommendations
