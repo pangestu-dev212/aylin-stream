@@ -57,9 +57,24 @@ export async function GET(
     if (source === 'otakudesu') {
       data = await getOtakudesuDetail(slug);
       if (!data) data = await getSamehadakuDetail(slug);
+      if (!data) {
+        const cleanTitle = slug.replace(/-sub-indo$/i, '').replace(/^1piece/i, 'one piece').replace(/-/g, ' ').trim();
+        const sameResults = await getSamehadakuSearch(cleanTitle).catch(() => []);
+        if (sameResults.length > 0) {
+          const match = sameResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || sameResults[0];
+          data = await getSamehadakuDetail(match.slug);
+        }
+      }
     } else if (source === 'samehadaku') {
       data = await getSamehadakuDetail(slug);
       if (!data) data = await getOtakudesuDetail(slug);
+      if (!data) {
+        const cleanTitle = slug.replace(/-[a-z0-9]{7}$/i, '').replace(/-/g, ' ').trim();
+        const otakuResults = await getOtakudesuSearch(cleanTitle).catch(() => []);
+        if (otakuResults.length > 0) {
+          data = await getOtakudesuDetail(otakuResults[0].slug);
+        }
+      }
     } else if (source === 'animexin') {
       data = await getAnimeXinDetail(slug);
     } else if (source === 'donghuastream') {
@@ -70,8 +85,16 @@ export async function GET(
       data = await getAnichinDetail(slug);
       if (!data) data = await getAnimeXinDetail(slug);
     } else {
-      data = await getOtakudesuDetail(slug);
-      if (!data) data = await getSamehadakuDetail(slug);
+      data = await getSamehadakuDetail(slug);
+      if (!data) data = await getOtakudesuDetail(slug);
+      if (!data) {
+        const cleanTitle = slug.replace(/-sub-indo$/i, '').replace(/^1piece/i, 'one piece').replace(/-[a-z0-9]{7}$/i, '').replace(/-/g, ' ').trim();
+        const sameResults = await getSamehadakuSearch(cleanTitle).catch(() => []);
+        if (sameResults.length > 0) {
+          const match = sameResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || sameResults[0];
+          data = await getSamehadakuDetail(match.slug);
+        }
+      }
     }
 
     if (!data) {

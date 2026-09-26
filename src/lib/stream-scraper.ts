@@ -1456,15 +1456,14 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
     const ongoing: AnimeCard[] = [];
 
     // Parse modern samehadaku post-show items & cards
-    $('ul li, .post-item, article, .sw-eps-isi').each((i, el) => {
-      const parent = $(el).closest('li').length ? $(el).closest('li') : $(el);
-      const title = parent.find('.sw-eps-judul a, h2 a, h3 a, .title a, .entry-title a').first().text().trim() ||
-                    parent.find('.sw-eps-judul, .title, .entry-title').first().text().trim();
-      const href = parent.find('a[href*="/nonton/"]').first().attr('href') || parent.find('a').first().attr('href') || '';
-      const img = parent.find('img').attr('src') || parent.find('img').attr('data-src') || '';
-      const thumbTitle = parent.find('a.sw-eps-thumb').attr('title') || parent.find('a').first().attr('title') || '';
+    $('article.sw-eps, article.post-item, article').each((i, el) => {
+      const title = $(el).find('.sw-eps-judul a, h2 a, h3 a, .title a, .entry-title a').first().text().trim() ||
+                    $(el).find('.sw-eps-judul, .title, .entry-title').first().text().trim();
+      const href = $(el).find('a.sw-eps-thumb, a[href*="/nonton/"]').first().attr('href') || $(el).find('a').first().attr('href') || '';
+      const img = $(el).find('img.sw-poster-gbr, img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const thumbTitle = $(el).find('a.sw-eps-thumb').attr('title') || $(el).find('a').first().attr('title') || '';
       const epMatch = (thumbTitle + ' ' + title).match(/Episode\s+\d+/i);
-      const ep = epMatch ? epMatch[0] : (parent.find('.ep, .epx, .sw-eps-baris').text().trim() || 'Ongoing');
+      const ep = epMatch ? epMatch[0] : ($(el).find('.sw-eps-baris a, .ep, .epx, .sw-eps-baris').first().text().trim() || 'Ongoing');
       const slug = extractSlug(href);
 
       if (title && slug && href.includes('samehadaku.video')) {
@@ -1690,18 +1689,26 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
-    $('.animpost, .animepost, article').each((i, el) => {
-      const title = $(el).find('.animposx .data .title h2, h2 a, h3 a, .title a').first().text().trim() || $(el).find('.animposx a').attr('title') || '';
-      const url = $(el).find('a').first().attr('href') || '';
-      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
-      const ep = $(el).find('.animposx .type, .epx, .ep').first().text().trim() || '';
-      const slug = extractSlug(url);
+    // Match both modern Samehadaku (.sw-kartu-tautan, article.sw-eps) and legacy layout
+    $('a.sw-kartu-tautan, article, .animepost, .animpost').each((i, el) => {
+      const isAnchor = $(el).is('a');
+      const href = isAnchor ? $(el).attr('href') : $(el).find('a').first().attr('href');
+      if (!href || !href.includes('/anime/')) return;
 
-      if (title && slug) {
+      const title = $(el).find('.sw-kartu-judul').text().trim() ||
+                    $(el).find('.animposx .data .title h2, h2 a, h3 a, .title a, h2, h3').first().text().trim() ||
+                    $(el).attr('title') ||
+                    $(el).find('a').first().attr('title') || '';
+
+      const img = $(el).find('img.sw-poster-gbr, img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const ep = $(el).find('.jarvis-eps, .epx, .ep').first().text().trim() || '';
+      const slug = extractSlug(href);
+
+      if (title && slug && !results.some(r => r.slug === slug)) {
         results.push({
           title,
           slug,
-          url: normalizeUrl(url, SAMEHADAKU_BASE),
+          url: normalizeUrl(href, SAMEHADAKU_BASE),
           img: normalizeUrl(img, SAMEHADAKU_BASE),
           ep,
           type: 'anime',
@@ -1712,8 +1719,8 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
 
     setInCache(cacheKey, results);
     return results;
-  } catch (err) {
-    console.error("Error in getSamehadakuSearch:", err);
+  } catch (err: any) {
+    console.warn("[Samehadaku] getSamehadakuSearch notice:", err?.message || err);
     return [];
   }
 }

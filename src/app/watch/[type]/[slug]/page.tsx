@@ -25,36 +25,64 @@ interface PageProps {
   }>;
 }
 
+async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedSource: string } | null> {
+  const cleanTitle = slug
+    .replace(/^(anilist|jikan)-\d+-/, '')
+    .replace(/-sub-indo$/i, '')
+    .replace(/-episode-\d+.*$/i, '')
+    .replace(/-[a-z0-9]{7}$/i, '')
+    .replace(/^1piece/i, 'one piece')
+    .replace(/-/g, ' ')
+    .trim();
+
+  if (!cleanTitle) return null;
+
+  // Try Samehadaku search first (Samehadaku works 100% on Vercel without Cloudflare blocking)
+  const sameResults = await getSamehadakuSearch(cleanTitle).catch(() => []);
+  if (sameResults.length > 0) {
+    const exact = sameResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || sameResults[0];
+    const d = await getSamehadakuDetail(exact.slug).catch(() => null);
+    if (d && d.episodes && d.episodes.length > 0) {
+      return { data: d, resolvedSource: 'samehadaku' };
+    }
+  }
+
+  // Try Otakudesu search fallback
+  const otakuResults = await getOtakudesuSearch(cleanTitle).catch(() => []);
+  if (otakuResults.length > 0) {
+    const exact = otakuResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || otakuResults[0];
+    const d = await getOtakudesuDetail(exact.slug).catch(() => null);
+    if (d && d.episodes && d.episodes.length > 0) {
+      return { data: d, resolvedSource: 'otakudesu' };
+    }
+  }
+
+  return null;
+}
+
 async function fetchDetail(type: string, slug: string, source?: string) {
   // 1. External AniList/Jikan slug
   if (slug.startsWith('anilist-') || slug.startsWith('jikan-')) {
-    const searchTitle = slug.replace(/^(anilist|jikan)-\d+-/, '').replace(/-/g, ' ').trim();
-    const [sameSearch, otakuSearch] = await Promise.all([
-      getSamehadakuSearch(searchTitle).catch(() => []),
-      getOtakudesuSearch(searchTitle).catch(() => [])
-    ]);
-
-    if (sameSearch.length > 0) {
-      const d = await getSamehadakuDetail(sameSearch[0].slug).catch(() => null);
-      if (d) return { data: d, resolvedSource: 'samehadaku' };
-    }
-    if (otakuSearch.length > 0) {
-      const d = await getOtakudesuDetail(otakuSearch[0].slug).catch(() => null);
-      if (d) return { data: d, resolvedSource: 'otakudesu' };
-    }
+    const fallback = await searchAnimeFallback(slug);
+    if (fallback) return fallback;
   }
 
   // 2. Specific source requested
   if (source === 'otakudesu') {
     const d = await getOtakudesuDetail(slug).catch(() => null);
-    if (d) return { data: d, resolvedSource: 'otakudesu' };
+    if (d && d.episodes && d.episodes.length > 0) return { data: d, resolvedSource: 'otakudesu' };
     const alt = await getSamehadakuDetail(slug).catch(() => null);
-    if (alt) return { data: alt, resolvedSource: 'samehadaku' };
+    if (alt && alt.episodes && alt.episodes.length > 0) return { data: alt, resolvedSource: 'samehadaku' };
+    // Otakudesu blocked/failed, auto-search Samehadaku
+    const fallback = await searchAnimeFallback(slug);
+    if (fallback) return fallback;
   } else if (source === 'samehadaku') {
     const d = await getSamehadakuDetail(slug).catch(() => null);
-    if (d) return { data: d, resolvedSource: 'samehadaku' };
+    if (d && d.episodes && d.episodes.length > 0) return { data: d, resolvedSource: 'samehadaku' };
     const d2 = await getOtakudesuDetail(slug).catch(() => null);
-    if (d2) return { data: d2, resolvedSource: 'otakudesu' };
+    if (d2 && d2.episodes && d2.episodes.length > 0) return { data: d2, resolvedSource: 'otakudesu' };
+    const fallback = await searchAnimeFallback(slug);
+    if (fallback) return fallback;
   } else if (source === 'animexin') {
     const d = await getAnimeXinDetail(slug).catch(() => null);
     if (d) return { data: d, resolvedSource: 'animexin' };
@@ -70,11 +98,14 @@ async function fetchDetail(type: string, slug: string, source?: string) {
     const alt = await getAnimeXinDetail(slug).catch(() => null);
     if (alt) return { data: alt, resolvedSource: 'animexin' };
   } else {
-    // anime default: try Otakudesu first, fallback to Samehadaku
-    const dOtaku = await getOtakudesuDetail(slug).catch(() => null);
-    if (dOtaku) return { data: dOtaku, resolvedSource: 'otakudesu' };
+    // anime default: try Samehadaku direct & Otakudesu direct
     const dSame = await getSamehadakuDetail(slug).catch(() => null);
-    if (dSame) return { data: dSame, resolvedSource: 'samehadaku' };
+    if (dSame && dSame.episodes && dSame.episodes.length > 0) return { data: dSame, resolvedSource: 'samehadaku' };
+    const dOtaku = await getOtakudesuDetail(slug).catch(() => null);
+    if (dOtaku && dOtaku.episodes && dOtaku.episodes.length > 0) return { data: dOtaku, resolvedSource: 'otakudesu' };
+    // Cross-search fallback
+    const fallback = await searchAnimeFallback(slug);
+    if (fallback) return fallback;
   }
 
   return { data: null, resolvedSource: source };
