@@ -37,28 +37,55 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
 
   if (!cleanTitle) return null;
 
-  // Try Samehadaku search first (Samehadaku works 100% on Vercel without Cloudflare blocking)
-  const sameResults = await getSamehadakuSearch(cleanTitle).catch(() => []);
-  if (sameResults.length > 0) {
-    const exact = sameResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || sameResults[0];
-    const d = await getSamehadakuDetail(exact.slug).catch(() => null);
-    if (d && d.episodes && d.episodes.length > 0) {
-      return { data: d, resolvedSource: 'samehadaku' };
+  const words = cleanTitle.split(' ');
+  const firstWord = words[0].toLowerCase();
+
+  // Helper: does result title contain at least first keyword?
+  const isRelevant = (title: string) => title.toLowerCase().includes(firstWord);
+
+  // Pick best match from relevant results
+  const pickBest = (results: any[]) => {
+    const relevant = results.filter(s => isRelevant(s.title));
+    if (relevant.length === 0) return null;
+    return relevant.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase())
+      || relevant.find(s => s.title.toLowerCase().startsWith(words.slice(0, 2).join(' ').toLowerCase()))
+      || relevant[0];
+  };
+
+  // Try progressively shorter queries: 3 words → 2 words → 1 word
+  const queries = [
+    words.slice(0, 3).join(' '),
+    words.slice(0, 2).join(' '),
+    words[0]
+  ].filter((q, i, arr) => arr.indexOf(q) === i); // deduplicate
+
+  // Try Samehadaku first (works reliably on Vercel)
+  for (const query of queries) {
+    const results = await getSamehadakuSearch(query).catch(() => []);
+    const best = pickBest(results);
+    if (best) {
+      const d = await getSamehadakuDetail(best.slug).catch(() => null);
+      if (d && d.episodes && d.episodes.length > 0) {
+        return { data: d, resolvedSource: 'samehadaku' };
+      }
     }
   }
 
-  // Try Otakudesu search fallback
-  const otakuResults = await getOtakudesuSearch(cleanTitle).catch(() => []);
-  if (otakuResults.length > 0) {
-    const exact = otakuResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || otakuResults[0];
-    const d = await getOtakudesuDetail(exact.slug).catch(() => null);
-    if (d && d.episodes && d.episodes.length > 0) {
-      return { data: d, resolvedSource: 'otakudesu' };
+  // Try Otakudesu fallback
+  for (const query of queries) {
+    const results = await getOtakudesuSearch(query).catch(() => []);
+    const best = pickBest(results);
+    if (best) {
+      const d = await getOtakudesuDetail(best.slug).catch(() => null);
+      if (d && d.episodes && d.episodes.length > 0) {
+        return { data: d, resolvedSource: 'otakudesu' };
+      }
     }
   }
 
   return null;
 }
+
 
 async function fetchDetail(type: string, slug: string, source?: string) {
   // 1. External AniList/Jikan slug

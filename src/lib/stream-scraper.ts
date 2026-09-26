@@ -978,19 +978,13 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
   if (cached) return cached;
 
   try {
-    // If slug starts with 'nonton-', it is typically a standalone movie
-    const isMovie = slug.startsWith('nonton-') || slug.includes('movie');
-    const candidateUrls = isMovie
-      ? [
-          `${JURAGANFILM_BASE}/${slug}/`,
-          `${JURAGANFILM_BASE}/film/${slug}/`,
-          `${JURAGANFILM_BASE}/film-seri/${slug}/`
-        ]
-      : [
-          `${JURAGANFILM_BASE}/film-seri/${slug}/`,
-          `${JURAGANFILM_BASE}/${slug}/`,
-          `${JURAGANFILM_BASE}/film/${slug}/`
-        ];
+    // Real Juraganfilm slugs use /film-seri/ for series and /film/ for movies
+    // Slugs often start with 'nonton-' e.g. nonton-the-early-spring-2026-sub-indo
+    const candidateUrls = [
+      `${JURAGANFILM_BASE}/film-seri/${slug}/`,
+      `${JURAGANFILM_BASE}/film/${slug}/`,
+      `${JURAGANFILM_BASE}/${slug}/`
+    ];
 
     let $: cheerio.CheerioAPI | null = null;
     let title = '';
@@ -1000,10 +994,14 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
         const fetched = await fetchHtml(testUrl);
         const $test = cheerio.load(fetched);
         const t = $test('.entry-title, h1').first().text().trim();
-        // Ensure this is a valid detail page and not a 404
-        if (t && !t.toLowerCase().includes('page not found') && !t.toLowerCase().includes('404')) {
+        // Reject soft-404 pages (tag pages, search result pages, "not found" pages)
+        const isTagOrSearch = t.toLowerCase().startsWith('tag:') ||
+                              t.toLowerCase().startsWith('search results') ||
+                              t.toLowerCase().includes('page not found') ||
+                              t.toLowerCase().includes('404');
+        if (t && !isTagOrSearch) {
           $ = $test;
-          title = t.replace(/^Nonton\s+(Film\s+)?/i, '').replace(/–\s*JuraganFIlm.*$/i, '').trim();
+          title = t.replace(/^Nonton\s+(Film\s+)?/i, '').replace(/[–-]\s*JuraganFIlm.*$/i, '').replace(/\s+Sub Indo$/i, '').trim();
           break;
         }
       } catch {}

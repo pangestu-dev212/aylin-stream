@@ -6,11 +6,57 @@ import { getOtakudesuDetail, getOtakudesuSearch, getAnichinDetail, getSamehadaku
  * e.g. "anilist-135865-saga-of-tanya-the-evil-season-2" → "saga of tanya the evil season 2"
  */
 function extractTitleFromExternalSlug(slug: string): string {
-  // Remove "anilist-{id}-" or "jikan-{id}-" prefix
   const cleaned = slug.replace(/^(anilist|jikan)-\d+-/, '');
-  // Convert hyphens back to spaces
   return cleaned.replace(/-/g, ' ').trim();
 }
+
+/**
+ * Smart anime search with progressive keyword shortening + relevance filtering.
+ * Tries 3 words → 2 words → 1 word until relevant results are found.
+ */
+async function smartAnimeSearch(cleanTitle: string): Promise<any | null> {
+  const words = cleanTitle.split(' ');
+  const firstWord = words[0].toLowerCase();
+
+  const isRelevant = (title: string) => title.toLowerCase().includes(firstWord);
+
+  const pickBest = (results: any[]) => {
+    const relevant = results.filter(s => isRelevant(s.title));
+    if (relevant.length === 0) return null;
+    return relevant.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase())
+      || relevant.find(s => s.title.toLowerCase().startsWith(words.slice(0, 2).join(' ').toLowerCase()))
+      || relevant[0];
+  };
+
+  const queries = [
+    words.slice(0, 3).join(' '),
+    words.slice(0, 2).join(' '),
+    words[0]
+  ].filter((q, i, arr) => arr.indexOf(q) === i);
+
+  // Samehadaku first
+  for (const query of queries) {
+    const results = await getSamehadakuSearch(query).catch(() => []);
+    const best = pickBest(results);
+    if (best) {
+      const d = await getSamehadakuDetail(best.slug).catch(() => null);
+      if (d && d.episodes && d.episodes.length > 0) return d;
+    }
+  }
+
+  // Otakudesu fallback
+  for (const query of queries) {
+    const results = await getOtakudesuSearch(query).catch(() => []);
+    const best = pickBest(results);
+    if (best) {
+      const d = await getOtakudesuDetail(best.slug).catch(() => null);
+      if (d && d.episodes && d.episodes.length > 0) return d;
+    }
+  }
+
+  return null;
+}
+
 
 export async function GET(
   req: NextRequest,
@@ -24,24 +70,11 @@ export async function GET(
 
     let data = null;
 
-    // Handle AniList / Jikan slugs → auto-search Otakudesu/Samehadaku
+    // Handle AniList / Jikan slugs → smart search
     const isExternalSlug = slug.startsWith('anilist-') || slug.startsWith('jikan-');
     if (isExternalSlug) {
       const searchTitle = extractTitleFromExternalSlug(slug);
-
-      // Try Otakudesu search first
-      const otakuResults = await getOtakudesuSearch(searchTitle).catch(() => []);
-      if (otakuResults.length > 0) {
-        data = await getOtakudesuDetail(otakuResults[0].slug).catch(() => null);
-      }
-
-      // Fallback: try Samehadaku search
-      if (!data) {
-        const sameResults = await getSamehadakuSearch(searchTitle).catch(() => []);
-        if (sameResults.length > 0) {
-          data = await getSamehadakuDetail(sameResults[0].slug).catch(() => null);
-        }
-      }
+      data = await smartAnimeSearch(searchTitle);
 
       if (!data) {
         return NextResponse.json(
@@ -55,25 +88,18 @@ export async function GET(
 
     // Normal slug handling
     if (source === 'otakudesu') {
-      data = await getOtakudesuDetail(slug);
-      if (!data) data = await getSamehadakuDetail(slug);
+      data = await getOtakudesuDetail(slug).catch(() => null);
+      if (!data) data = await getSamehadakuDetail(slug).catch(() => null);
       if (!data) {
         const cleanTitle = slug.replace(/-sub-indo$/i, '').replace(/^1piece/i, 'one piece').replace(/-/g, ' ').trim();
-        const sameResults = await getSamehadakuSearch(cleanTitle).catch(() => []);
-        if (sameResults.length > 0) {
-          const match = sameResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || sameResults[0];
-          data = await getSamehadakuDetail(match.slug);
-        }
+        data = await smartAnimeSearch(cleanTitle);
       }
     } else if (source === 'samehadaku') {
-      data = await getSamehadakuDetail(slug);
-      if (!data) data = await getOtakudesuDetail(slug);
+      data = await getSamehadakuDetail(slug).catch(() => null);
+      if (!data) data = await getOtakudesuDetail(slug).catch(() => null);
       if (!data) {
         const cleanTitle = slug.replace(/-[a-z0-9]{7}$/i, '').replace(/-/g, ' ').trim();
-        const otakuResults = await getOtakudesuSearch(cleanTitle).catch(() => []);
-        if (otakuResults.length > 0) {
-          data = await getOtakudesuDetail(otakuResults[0].slug);
-        }
+        data = await smartAnimeSearch(cleanTitle);
       }
     } else if (source === 'animexin') {
       data = await getAnimeXinDetail(slug);
@@ -85,15 +111,11 @@ export async function GET(
       data = await getAnichinDetail(slug);
       if (!data) data = await getAnimeXinDetail(slug);
     } else {
-      data = await getSamehadakuDetail(slug);
-      if (!data) data = await getOtakudesuDetail(slug);
+      data = await getSamehadakuDetail(slug).catch(() => null);
+      if (!data) data = await getOtakudesuDetail(slug).catch(() => null);
       if (!data) {
         const cleanTitle = slug.replace(/-sub-indo$/i, '').replace(/^1piece/i, 'one piece').replace(/-[a-z0-9]{7}$/i, '').replace(/-/g, ' ').trim();
-        const sameResults = await getSamehadakuSearch(cleanTitle).catch(() => []);
-        if (sameResults.length > 0) {
-          const match = sameResults.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase()) || sameResults[0];
-          data = await getSamehadakuDetail(match.slug);
-        }
+        data = await smartAnimeSearch(cleanTitle);
       }
     }
 
