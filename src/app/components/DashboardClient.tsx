@@ -248,12 +248,12 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
       trailer: "https://www.youtube.com/embed/gS_p4T_PZfA"
     },
     {
-      title: "Sora wa Akai Kawa no Hotori",
-      desc: "Yuuri Suzuki terlempar ke Kekaisaran Hittite kuno akibat ritual sihir Ratu Nakia. Ikuti perjuangan cintanya di dunia pasir.",
-      img: "https://otakudesu.blog/wp-content/uploads/2026/07/Sora-wa-Akai-Kawa-no-Hotori-Sub.jpg",
-      slug: "sora-akai-kawa-hotori-sub-indo",
+      title: "One Piece",
+      desc: "Petualangan Monkey D. Luffy bersama kru Bajak Laut Topi Jerami menjelajahi Grand Line demi menemukan harta karun terbesar di dunia, One Piece.",
+      img: "https://otakudesu.blog/wp-content/uploads/2019/01/One-Piece-Sub-Indo.jpg",
+      slug: "one-piece-sub-indo",
       type: "anime",
-      trailer: "https://www.youtube.com/embed/9BqM2Wv9eXQ"
+      trailer: "https://www.youtube.com/embed/S8_YwFLCh4U"
     },
     {
       title: "Swallowed Star (Tunshi Xingkong)",

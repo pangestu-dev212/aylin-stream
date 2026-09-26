@@ -465,8 +465,8 @@ export async function getOtakudesuDetail(slug: string): Promise<AnimeDetail | nu
     const result = { title, slug, img, synopsis, details, episodes, type: 'anime' as const };
     setInCache(cacheKey, result);
     return result;
-  } catch (err) {
-    console.error(`Error in getOtakudesuDetail for ${slug}:`, err);
+  } catch (err: any) {
+    console.warn(`[Otakudesu] Detail skipped/not found for ${slug}: ${err?.message || err}`);
     return null;
   }
 }
@@ -1420,8 +1420,8 @@ export async function getWeeklySchedule(): Promise<DaySchedule[]> {
       return schedule;
     }
     return [];
-  } catch (err) {
-    console.error("Error in getWeeklySchedule:", err);
+  } catch (err: any) {
+    console.warn("[Otakudesu] getWeeklySchedule notice:", err?.message || err);
     return [];
   }
 }
