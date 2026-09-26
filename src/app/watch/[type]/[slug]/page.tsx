@@ -45,10 +45,14 @@ async function fetchDetail(type: string, slug: string, source?: string) {
   }
 
   // 2. Specific source requested
-  if (source === 'samehadaku') {
+  if (source === 'otakudesu') {
+    const d = await getOtakudesuDetail(slug).catch(() => null);
+    if (d) return { data: d, resolvedSource: 'otakudesu' };
+    const alt = await getSamehadakuDetail(slug).catch(() => null);
+    if (alt) return { data: alt, resolvedSource: 'samehadaku' };
+  } else if (source === 'samehadaku') {
     const d = await getSamehadakuDetail(slug).catch(() => null);
     if (d) return { data: d, resolvedSource: 'samehadaku' };
-    // fallback to otakudesu
     const d2 = await getOtakudesuDetail(slug).catch(() => null);
     if (d2) return { data: d2, resolvedSource: 'otakudesu' };
   } else if (source === 'animexin') {
@@ -66,11 +70,11 @@ async function fetchDetail(type: string, slug: string, source?: string) {
     const alt = await getAnimeXinDetail(slug).catch(() => null);
     if (alt) return { data: alt, resolvedSource: 'animexin' };
   } else {
-    // anime default: try Samehadaku then Otakudesu
-    const dSame = await getSamehadakuDetail(slug).catch(() => null);
-    if (dSame) return { data: dSame, resolvedSource: 'samehadaku' };
+    // anime default: try Otakudesu first, fallback to Samehadaku
     const dOtaku = await getOtakudesuDetail(slug).catch(() => null);
     if (dOtaku) return { data: dOtaku, resolvedSource: 'otakudesu' };
+    const dSame = await getSamehadakuDetail(slug).catch(() => null);
+    if (dSame) return { data: dSame, resolvedSource: 'samehadaku' };
   }
 
   return { data: null, resolvedSource: source };

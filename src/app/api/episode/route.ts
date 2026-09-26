@@ -26,8 +26,12 @@ export async function GET(req: NextRequest) {
     }
 
     let data = null;
-    if (source === 'samehadaku') {
+    if (source === 'otakudesu') {
+      data = await getOtakudesuEpisode(slug);
+      if (!data) data = await getSamehadakuEpisode(slug);
+    } else if (source === 'samehadaku') {
       data = await getSamehadakuEpisode(slug);
+      if (!data) data = await getOtakudesuEpisode(slug);
     } else if (source === 'animexin') {
       data = await getAnimeXinEpisode(slug);
     } else if (source === 'donghuastream') {
@@ -36,8 +40,10 @@ export async function GET(req: NextRequest) {
       data = await getJuraganfilmEpisode(slug);
     } else if (type === 'donghua') {
       data = await getAnichinEpisode(slug);
+      if (!data) data = await getAnimeXinEpisode(slug);
     } else {
       data = await getOtakudesuEpisode(slug);
+      if (!data) data = await getSamehadakuEpisode(slug);
     }
 
     if (!data) {

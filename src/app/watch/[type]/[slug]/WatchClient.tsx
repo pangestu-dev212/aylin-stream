@@ -218,13 +218,14 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
     const profile = localStorage.getItem('aylin_active_profile') || 'Utama';
     setActiveProfile(profile);
 
-    // Sync initialSource to preferredSource in localStorage
+    // Sync initialSource to preferredSource in localStorage (scoped by media type)
+    const prefKey = `aylin_preferred_source_${type}`;
     if (initialSource === 'animexin' || initialSource === 'samehadaku') {
-      localStorage.setItem('aylin_preferred_source', 'cadangan');
+      localStorage.setItem(prefKey, 'cadangan');
     } else if (initialSource === 'donghuastream') {
-      localStorage.setItem('aylin_preferred_source', 'alternatif');
-    } else if (initialSource === 'anichin' || initialSource === 'otakudesu') {
-      localStorage.setItem('aylin_preferred_source', 'utama');
+      localStorage.setItem(prefKey, 'alternatif');
+    } else if (initialSource === 'anichin' || initialSource === 'otakudesu' || initialSource === 'juraganfilm') {
+      localStorage.setItem(prefKey, 'utama');
     }
 
     // Auto-switch to preferred source if no source is specified in the URL query parameter
@@ -232,7 +233,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
       const urlParams = new URLSearchParams(window.location.search);
       const urlSource = urlParams.get('source');
       if (!urlSource) {
-        const preferred = localStorage.getItem('aylin_preferred_source');
+        const preferred = localStorage.getItem(prefKey);
         if (preferred === 'cadangan' || preferred === 'alternatif') {
           setTimeout(() => {
             handleSourceChange(preferred as 'cadangan' | 'alternatif');
@@ -240,7 +241,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         }
       }
     }
-  }, [initialSource]);
+  }, [initialSource, type]);
 
   // Fetch ongoing recommendations on mount
   useEffect(() => {
@@ -560,7 +561,15 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         }
 
         let refererParam = '';
-        if (activeSource === 'cadangan') {
+        if (hostname.includes('filedon') || hostname.includes('pdrain') || hostname.includes('otakudesu')) {
+          refererParam = 'https://otakudesu.blog';
+        } else if (hostname.includes('juragan') || hostname.includes('rapidvideo')) {
+          refererParam = 'https://tv49.juragan.film';
+        } else if (hostname.includes('samehadaku') || hostname.includes('putarin')) {
+          refererParam = 'https://samehadaku.video';
+        } else if (hostname.includes('animexin')) {
+          refererParam = 'https://animexin.dev';
+        } else if (activeSource === 'cadangan') {
           refererParam = type === 'donghua' ? 'https://animexin.dev' : 'https://samehadaku.video';
         } else if (type === 'donghua') {
           refererParam = 'https://anichin.moe';
@@ -581,7 +590,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
   const handleSourceChange = async (source: 'utama' | 'cadangan' | 'alternatif') => {
     setActiveSource(source);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('aylin_preferred_source', source);
+      localStorage.setItem(`aylin_preferred_source_${type}`, source);
     }
     setEpisodeLoading(true);
     setMirrors([]);
@@ -1427,10 +1436,11 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                 </div>
               ) : playerSrc ? (
                 <>
-                  {playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?') || activeMirror?.payload?.directSrc ? (
+                  {((activeMirror?.payload?.directSrc && (activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?'))) ||
+                    playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?')) ? (
                     <video
                       key={playerSrc}
-                      src={activeMirror?.payload?.directSrc || playerSrc}
+                      src={(activeMirror?.payload?.directSrc && (activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?'))) ? activeMirror.payload.directSrc : playerSrc}
                       controls
                       autoPlay
                       playsInline

@@ -193,7 +193,7 @@ function rewriteHtml(html: string, originalUrl: string, refererOrigin: string): 
       const iframeUrl = new URL(absoluteIframeSrc);
       const host = iframeUrl.hostname;
       
-      const matchDomains = ['anichin', 'animexin', 'samehadaku', 'otakudesu', 'gdriveplayer', 'juragan', 'putarin', 'rapidvideo'];
+      const matchDomains = ['anichin', 'animexin', 'samehadaku', 'otakudesu', 'gdriveplayer', 'juragan', 'putarin', 'rapidvideo', 'filedon', 'pdrain'];
       if (matchDomains.some(d => host.includes(d))) {
         return `${prefix}/api/stream-proxy?url=${encodeURIComponent(absoluteIframeSrc)}&referer=${encodeURIComponent(refererOrigin)}"`;
       }
@@ -235,7 +235,7 @@ export async function GET(req: NextRequest) {
       refererOrigin = 'https://samehadaku.video';
     } else if (parsedTarget.hostname.includes('juragan') || parsedTarget.hostname.includes('rapidvideo')) {
       refererOrigin = 'https://tv49.juragan.film';
-    } else if (parsedTarget.hostname.includes('otakudesu')) {
+    } else if (parsedTarget.hostname.includes('otakudesu') || parsedTarget.hostname.includes('filedon') || parsedTarget.hostname.includes('pdrain')) {
       refererOrigin = 'https://otakudesu.blog';
     }
   }

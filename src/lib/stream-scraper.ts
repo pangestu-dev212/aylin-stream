@@ -1131,6 +1131,13 @@ export async function getJuraganfilmEpisode(slug: string) {
 
     const mirrors: any[] = [];
 
+    // Always include web embed player as the primary high-compatibility option
+    mirrors.push({
+      quality: 'HD',
+      playerText: 'Web Player (Embed)',
+      payload: { src: playerSrc }
+    });
+
     // If iframe is jf_engine, fetch jf_engine to extract direct SOURCES (MP4/HLS)
     if (playerSrc.includes('jf_engine')) {
       try {
@@ -1139,17 +1146,30 @@ export async function getJuraganfilmEpisode(slug: string) {
         if (sourceMatch) {
           const sources = JSON.parse(sourceMatch[1]);
           if (Array.isArray(sources)) {
-            sources.forEach((s: any, idx: number) => {
-              if (s.link) {
-                mirrors.push({
-                  quality: s.label || 'HD',
-                  playerText: `Server ${s.label || idx + 1}`,
-                  payload: {
-                    src: s.link,
-                    directSrc: s.link
-                  }
-                });
-              }
+            // Add MP4 sources first (compatible natively with <video>)
+            const mp4Sources = sources.filter((s: any) => s.link && (s.link.includes('.mp4') || s.label?.includes('MP4')));
+            mp4Sources.forEach((s: any, idx: number) => {
+              mirrors.push({
+                quality: s.label || 'MP4',
+                playerText: `Server ${s.label || `MP4 ${idx + 1}`}`,
+                payload: {
+                  src: s.link,
+                  directSrc: s.link
+                }
+              });
+            });
+
+            // Then add adaptive HLS sources
+            const otherSources = sources.filter((s: any) => s.link && !s.link.includes('.mp4') && !s.label?.includes('MP4'));
+            otherSources.forEach((s: any, idx: number) => {
+              mirrors.push({
+                quality: s.label || 'Streaming',
+                playerText: `Server ${s.label || `Streaming ${idx + 1}`}`,
+                payload: {
+                  src: s.link,
+                  directSrc: s.link
+                }
+              });
             });
           }
         }
@@ -1157,13 +1177,6 @@ export async function getJuraganfilmEpisode(slug: string) {
         console.warn('Failed to parse jf_engine direct streams:', jfErr);
       }
     }
-
-    // Always include web embed player as option
-    mirrors.push({
-      quality: 'HD',
-      playerText: 'Web Player (Embed)',
-      payload: { src: playerSrc }
-    });
 
     const result = { title, slug, mirrors };
     setInCache(cacheKey, result);
@@ -1530,6 +1543,10 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
     }
 
     const rawTitle = $('.entry-title, h1').first().text().trim();
+    if (!rawTitle || rawTitle.toLowerCase().includes('samehadaku') || rawTitle.toLowerCase().includes('page not found') || rawTitle.toLowerCase().includes('404')) {
+      return null;
+    }
+
     const title = rawTitle.replace(/Sub\s+Indo/i, '').replace(/Nonton\s+Anime\s+/i, '').trim();
     const rawImg = $('.thumb img').attr('src') || $('.info-content img').attr('src') || $('img.sw-poster-gbr').attr('src') || $('img').first().attr('src') || '';
     const img = normalizeUrl(rawImg, SAMEHADAKU_BASE);
@@ -1554,9 +1571,9 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
       }
     });
 
-    // Fallback: if no episodes were found, add current episode as playable
+    // If no episodes were found, this is not a valid series page
     if (episodes.length === 0) {
-      episodes.push({ title: 'Tonton Episode', slug });
+      return null;
     }
 
     const result: AnimeDetail = { title, slug: seriesSlug, img, synopsis, details, episodes, type: 'anime' };

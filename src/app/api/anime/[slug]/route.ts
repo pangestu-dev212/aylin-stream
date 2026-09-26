@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOtakudesuDetail, getOtakudesuSearch, getAnichinDetail, getSamehadakuDetail, getSamehadakuSearch, getAnimeXinDetail, getDonghuastreamDetail } from '@/lib/stream-scraper';
+import { getOtakudesuDetail, getOtakudesuSearch, getAnichinDetail, getSamehadakuDetail, getSamehadakuSearch, getAnimeXinDetail, getDonghuastreamDetail, getJuraganfilmDetail } from '@/lib/stream-scraper';
 
 /**
  * Extract a clean search query from an AniList or Jikan prefixed slug.
@@ -54,16 +54,24 @@ export async function GET(
     }
 
     // Normal slug handling
-    if (source === 'samehadaku') {
+    if (source === 'otakudesu') {
+      data = await getOtakudesuDetail(slug);
+      if (!data) data = await getSamehadakuDetail(slug);
+    } else if (source === 'samehadaku') {
       data = await getSamehadakuDetail(slug);
+      if (!data) data = await getOtakudesuDetail(slug);
     } else if (source === 'animexin') {
       data = await getAnimeXinDetail(slug);
     } else if (source === 'donghuastream') {
       data = await getDonghuastreamDetail(slug);
+    } else if (type === 'drama') {
+      data = await getJuraganfilmDetail(slug);
     } else if (type === 'donghua') {
       data = await getAnichinDetail(slug);
+      if (!data) data = await getAnimeXinDetail(slug);
     } else {
       data = await getOtakudesuDetail(slug);
+      if (!data) data = await getSamehadakuDetail(slug);
     }
 
     if (!data) {
