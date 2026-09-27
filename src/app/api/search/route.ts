@@ -8,6 +8,7 @@ import {
   getDonghuastreamSearch 
 } from '@/lib/stream-scraper';
 import { searchManga } from '@/lib/manga-scraper';
+import { searchShortDrama } from '@/lib/shortdrama-scraper';
 
 export async function GET(req: NextRequest) {
   try {
@@ -36,6 +37,10 @@ export async function GET(req: NextRequest) {
       const results = await searchManga(query).catch(() => []);
       return NextResponse.json({ success: true, results: results.map(r => ({ ...r, type: 'manga' as const })) });
     }
+    if (source === 'shortdrama') {
+      const results = await searchShortDrama(query).catch(() => []);
+      return NextResponse.json({ success: true, results: results.map(r => ({ ...r, type: 'shortdrama' as const })) });
+    }
 
     // Fetch from all concurrently
     const [
@@ -45,7 +50,8 @@ export async function GET(req: NextRequest) {
       animexinResults,
       donghuaStreamResults,
       dramaResults,
-      mangaResults
+      mangaResults,
+      shortDramaResults
     ] = await Promise.all([
       getOtakudesuSearch(query).catch(() => []),
       getSamehadakuSearch(query).catch(() => []),
@@ -53,7 +59,8 @@ export async function GET(req: NextRequest) {
       getAnimeXinSearch(query).catch(() => []),
       getDonghuastreamSearch(query).catch(() => []),
       getJuraganfilmSearch(query).catch(() => []),
-      searchManga(query).catch(() => [])
+      searchManga(query).catch(() => []),
+      searchShortDrama(query).catch(() => [])
     ]);
 
     const mappedDrama = dramaResults.map(item => ({ ...item, type: 'drama' as const }));
@@ -65,12 +72,21 @@ export async function GET(req: NextRequest) {
       ep: item.latestChapter, 
       type: 'manga' as const 
     }));
+    const mappedShortDrama = shortDramaResults.map(item => ({
+      title: item.title,
+      slug: item.slug,
+      url: `/shortdrama/${item.slug}`,
+      img: item.cover,
+      ep: `${item.chapterCount} Ep`,
+      type: 'shortdrama' as const,
+    }));
 
     // Concatenate, placing primary sources first so they are preferred during deduplication
     const combinedRaw = [
       ...otakuResults,
       ...anichinResults,
       ...mappedDrama,
+      ...mappedShortDrama,
       ...mappedManga,
       ...sameResults,
       ...animexinResults,

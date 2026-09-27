@@ -1,5 +1,6 @@
 import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing, getJikanOngoingAnime } from '@/lib/stream-scraper';
 import { getLatestManga } from '@/lib/manga-scraper';
+import { getShortDramaPopular } from '@/lib/shortdrama-scraper';
 import DashboardClient from './components/DashboardClient';
 
 // Revalidate every 3 minutes so fresh episodes appear promptly
@@ -7,13 +8,14 @@ export const revalidate = 180;
 
 export default async function Home() {
   // Fetch all live data sources in parallel
-  const [rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama, rawJikan, rawManga] = await Promise.all([
+  const [rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama, rawJikan, rawManga, rawShortDrama] = await Promise.all([
     getSamehadakuOngoing().catch(() => []),
     getOtakudesuOngoing().catch(() => []),
     getAnichinOngoing().catch(() => []),
     getJuraganfilmOngoing().catch(() => []),
     getJikanOngoingAnime().catch(() => []),
-    getLatestManga().catch(() => [])
+    getLatestManga().catch(() => []),
+    getShortDramaPopular().catch(() => [])
   ]);
 
   // Priority: Fresh sub Indo releases (Samehadaku → Otakudesu) → fallback global AniList
@@ -38,6 +40,7 @@ export default async function Home() {
       initialDonghua={ongoingDonghua} 
       initialDrama={ongoingDrama}
       initialManga={ongoingManga}
+      initialShortDrama={rawShortDrama}
     />
   );
 }

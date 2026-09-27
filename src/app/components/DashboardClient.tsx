@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { 
   Play, Search, Star, Film, Tv, Clock, X, ArrowUpRight,
   Bell, BellOff, User, Plus, Trash2, ChevronDown, Palette,
-  RefreshCw, Copy, Check, Link2, BookOpen
+  RefreshCw, Copy, Check, Link2, BookOpen, Smartphone, Flame
 } from 'lucide-react';
 import { AnimeCard } from '@/lib/stream-scraper';
 import { MangaCard } from '@/lib/manga-scraper';
+import { ShortDramaCard } from '@/lib/shortdrama-scraper';
 import { useTheme, THEMES } from '../context/ThemeContext';
 import { isSupabaseActive } from '@/lib/supabaseClient';
 import {
@@ -25,15 +26,22 @@ interface DashboardClientProps {
   initialDonghua: AnimeCard[];
   initialDrama: AnimeCard[];
   initialManga?: MangaCard[];
+  initialShortDrama?: ShortDramaCard[];
 }
 
-export default function DashboardClient({ initialAnime, initialDonghua, initialDrama, initialManga = [] }: DashboardClientProps) {
+export default function DashboardClient({ 
+  initialAnime, 
+  initialDonghua, 
+  initialDrama, 
+  initialManga = [],
+  initialShortDrama = []
+}: DashboardClientProps) {
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<AnimeCard[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchFilter, setSearchFilter] = useState<'ALL' | 'anime' | 'donghua' | 'drama' | 'manga'>('ALL');
+  const [searchFilter, setSearchFilter] = useState<'ALL' | 'anime' | 'donghua' | 'drama' | 'manga' | 'shortdrama'>('ALL');
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Bookmarks state
@@ -966,6 +974,10 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
             <a href="#anime" className="hover:text-violet-400 transition-colors">Anime</a>
             <a href="#donghua" className="hover:text-violet-400 transition-colors">Donghua</a>
             <a href="#drama" className="hover:text-violet-400 transition-colors">Drama &amp; Film</a>
+            <Link href="/shortdrama" className="hover:text-rose-400 transition-colors flex items-center gap-1">
+              <Smartphone size={14} className="text-rose-400" /> Drama 9:16
+              <span className="text-[8px] px-1 py-0.2 rounded bg-rose-500 text-white font-extrabold uppercase">Baru</span>
+            </Link>
             <a href="#manga" className="hover:text-amber-400 transition-colors flex items-center gap-1">
               <BookOpen size={14} className="text-amber-400" /> Komik
             </a>
@@ -1034,7 +1046,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 {/* Search category filters */}
                 {!searchLoading && searchResults.length > 0 && (
                   <div className="flex items-center gap-1.5 pb-2 border-b border-slate-800/80 overflow-x-auto scrollbar-none">
-                    {(['ALL', 'anime', 'donghua', 'drama', 'manga'] as const).map((filter) => {
+                    {(['ALL', 'anime', 'donghua', 'drama', 'manga', 'shortdrama'] as const).map((filter) => {
                       const count = filter === 'ALL' 
                         ? searchResults.length 
                         : searchResults.filter(item => item.type === filter).length;
@@ -1048,7 +1060,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                               : 'bg-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/10'
                           }`}
                         >
-                          {filter} ({count})
+                          {filter === 'shortdrama' ? '9:16' : filter} ({count})
                         </button>
                       );
                     })}
@@ -1085,7 +1097,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                       return filtered.map((item) => (
                         <Link
                           key={`${item.type}-${item.slug}`}
-                          href={item.type === 'manga' ? `/manga/${item.slug}` : `/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
+                          href={item.type === 'shortdrama' ? `/shortdrama/${item.slug}` : item.type === 'manga' ? `/manga/${item.slug}` : `/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
                           className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-xl transition-colors group"
                         >
                           <div className="relative w-12 h-16 rounded-md overflow-hidden bg-slate-800 flex-shrink-0">
@@ -1106,9 +1118,11 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                                   ? 'bg-fuchsia-950 text-fuchsia-400 border border-fuchsia-800/30' 
                                   : item.type === 'drama'
                                     ? 'bg-rose-950 text-rose-400 border border-rose-800/30'
-                                    : item.type === 'manga'
-                                      ? 'bg-amber-950 text-amber-400 border border-amber-800/30'
-                                      : 'bg-violet-950 text-violet-400 border border-violet-800/30'
+                                    : item.type === 'shortdrama'
+                                      ? 'bg-pink-950 text-pink-400 border border-pink-800/30'
+                                      : item.type === 'manga'
+                                        ? 'bg-amber-950 text-amber-400 border border-amber-800/30'
+                                        : 'bg-violet-950 text-violet-400 border border-violet-800/30'
                               }`}>
                                 {item.type}
                               </span>
@@ -1956,6 +1970,87 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                   )}
                 </div>
               </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 8. Drama Pendek Tegak (9:16) Grid (DramaBox) */}
+      <section id="shortdrama" className="mt-16 px-4 sm:px-8 flex flex-col gap-5 scroll-mt-24">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-900 pb-3 gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-rose-600/10 border border-rose-500/20 rounded-xl text-rose-400">
+              <Smartphone size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold tracking-tight text-slate-100">Drama Pendek Tegak (9:16)</h2>
+                <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-500 text-white shadow-sm">
+                  Format HP
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">Mini drama China vertikal format ponsel sub/dub Indo ala DramaBox &amp; ReelShort</p>
+            </div>
+          </div>
+
+          <Link
+            href="/shortdrama"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-slate-800 text-rose-300 hover:text-white transition-all cursor-pointer"
+          >
+            <Flame size={14} className="text-rose-400" /> Lihat Katalog Lengkap 9:16 →
+          </Link>
+        </div>
+
+        {initialShortDrama.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-2xl">
+            <Smartphone size={40} className="mb-2 text-slate-600" />
+            <p className="text-sm">Sedang memuat drama pendek...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-5">
+            {initialShortDrama.slice(0, 12).map((drama, idx) => (
+              <Link
+                key={`shortdrama-${drama.bookId}-${idx}`}
+                href={`/shortdrama/${drama.slug}`}
+                className="group relative flex flex-col bg-slate-900/80 rounded-2xl overflow-hidden border border-slate-800/80 hover:border-rose-500/40 transition-all duration-300 hover:scale-105 shadow-xl hover:shadow-rose-500/10 cursor-pointer"
+              >
+                <div className="relative aspect-[9/16] bg-slate-950 overflow-hidden">
+                  <img
+                    src={drama.cover ? `/api/image-proxy?url=${encodeURIComponent(drama.cover)}` : undefined}
+                    alt={drama.title}
+                    className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80" />
+
+                  {/* Play icon overlay */}
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <div className="w-10 h-10 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-lg shadow-rose-500/40">
+                      <Play size={18} fill="white" className="ml-0.5" />
+                    </div>
+                  </div>
+
+                  <span className="absolute top-2.5 left-2.5 text-[8px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-md">
+                    9:16
+                  </span>
+
+                  {drama.chapterCount > 0 && (
+                    <span className="absolute bottom-2.5 right-2.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/80 text-amber-300 border border-slate-700">
+                      {drama.chapterCount} Ep
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-3 flex flex-col justify-between flex-1 gap-1">
+                  <h3 className="font-extrabold text-xs text-slate-100 line-clamp-2 leading-snug group-hover:text-rose-400 transition-colors">
+                    {drama.title}
+                  </h3>
+                  {drama.tags.length > 0 && (
+                    <span className="text-[10px] text-slate-400 truncate mt-auto">
+                      {drama.tags[0]}
+                    </span>
+                  )}
+                </div>
+              </Link>
             ))}
           </div>
         )}
