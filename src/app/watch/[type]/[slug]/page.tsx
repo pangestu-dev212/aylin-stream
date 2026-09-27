@@ -67,11 +67,10 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
     return s;
   };
 
-  // Pick best match from relevant results by score
-  const pickBest = (results: any[]): any | null => {
+  // Get sorted candidate matches by relevance and score
+  const getSortedCandidates = (results: any[]): any[] => {
     const relevant = results.filter(s => isRelevant(s.title));
-    if (relevant.length === 0) return null;
-    return relevant.sort((a, b) => score(b.title) - score(a.title))[0];
+    return relevant.sort((a, b) => score(b.title) - score(a.title));
   };
 
   // Try progressively shorter queries: 3 words → 2 words → 1 word
@@ -84,9 +83,9 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
   // Try Samehadaku first (works reliably on Vercel)
   for (const query of queries) {
     const results = await getSamehadakuSearch(query).catch(() => []);
-    const best = pickBest(results);
-    if (best) {
-      const d = await getSamehadakuDetail(best.slug).catch(() => null);
+    const sorted = getSortedCandidates(results);
+    for (const cand of sorted) {
+      const d = await getSamehadakuDetail(cand.slug).catch(() => null);
       if (d && d.episodes && d.episodes.length > 0) {
         return { data: d, resolvedSource: 'samehadaku' };
       }
@@ -96,9 +95,9 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
   // Try Otakudesu fallback
   for (const query of queries) {
     const results = await getOtakudesuSearch(query).catch(() => []);
-    const best = pickBest(results);
-    if (best) {
-      const d = await getOtakudesuDetail(best.slug).catch(() => null);
+    const sorted = getSortedCandidates(results);
+    for (const cand of sorted) {
+      const d = await getOtakudesuDetail(cand.slug).catch(() => null);
       if (d && d.episodes && d.episodes.length > 0) {
         return { data: d, resolvedSource: 'otakudesu' };
       }

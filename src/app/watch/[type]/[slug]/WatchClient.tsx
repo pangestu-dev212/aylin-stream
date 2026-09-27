@@ -549,16 +549,22 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         'mega.nz',
         'dailymotion.com', 'geo.dailymotion.com', 'dmcdn.net',
         'gdriveplayer.to', 'gdriveplayer.me', 'gdriveplayer.us',
+        'pixeldrain.com',
       ];
       const needsProxy = !publicHosts.some(host =>
         hostname === host || hostname.endsWith('.' + host)
-      ) && !hostname.includes('gdriveplayer');
+      ) && !hostname.includes('gdriveplayer') && !hostname.includes('pixeldrain');
 
       if (needsProxy) {
-        // Direct video files (.mp4) don't need HTML proxying
-        if (normalizedSrc.endsWith('.mp4') || normalizedSrc.includes('.mp4?')) {
+        // Direct video files (.mp4, .mkv, pixeldrain direct file api) don't need HTML proxying
+        if (
+          normalizedSrc.endsWith('.mp4') || normalizedSrc.includes('.mp4?') ||
+          normalizedSrc.endsWith('.mkv') || normalizedSrc.includes('.mkv?') ||
+          normalizedSrc.includes('pixeldrain.com/api/file/')
+        ) {
           return normalizedSrc;
         }
+
 
         let refererParam = '';
         if (hostname.includes('filedon') || hostname.includes('pdrain') || hostname.includes('otakudesu')) {
@@ -1436,14 +1442,26 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                 </div>
               ) : playerSrc ? (
                 <>
-                  {((activeMirror?.payload?.directSrc && (activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?'))) ||
-                    playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?')) ? (
+                  {((activeMirror?.payload?.directSrc && (
+
+                      activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
+                      activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
+                      activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/')
+                    )) ||
+                    playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?') ||
+                    playerSrc.endsWith('.mkv') || playerSrc.includes('.mkv?') ||
+                    playerSrc.includes('pixeldrain.com/api/file/')) ? (
                     <video
                       key={playerSrc}
-                      src={(activeMirror?.payload?.directSrc && (activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?'))) ? activeMirror.payload.directSrc : playerSrc}
+                      src={(activeMirror?.payload?.directSrc && (
+                        activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
+                        activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
+                        activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/')
+                      )) ? activeMirror.payload.directSrc : playerSrc}
                       controls
                       autoPlay
                       playsInline
+
                       onEnded={() => {
                         if (hasNextEpisode()) {
                           showHUD('Episode Selesai, memutar episode berikutnya... ⏭️');

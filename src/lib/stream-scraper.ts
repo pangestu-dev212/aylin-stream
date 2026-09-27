@@ -1428,7 +1428,7 @@ export async function getWeeklySchedule(): Promise<DaySchedule[]> {
 // SAMEHADAKU SCRAPER (ALTERNATIVE ANIME)
 // ==========================================
 
-const SAMEHADAKU_BASE = 'https://samehadaku.video';
+const SAMEHADAKU_BASE = 'https://v2.samehadaku.how';
 
 let samehadakuOngoingCache: { data: AnimeCard[]; timestamp: number } | null = null;
 
@@ -1441,30 +1441,29 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
   try {
     let html = '';
     try {
-      html = await fetchHtml(`${SAMEHADAKU_BASE}/anime-terbaru-pgddvcs/`);
+      html = await fetchHtml(`${SAMEHADAKU_BASE}/`);
     } catch {
       try {
-        html = await fetchHtml(`${SAMEHADAKU_BASE}/ongoing-brs4kyi/`);
-      } catch {
-        html = await fetchHtml(`${SAMEHADAKU_BASE}/`);
-      }
+        html = await fetchHtml(`${SAMEHADAKU_BASE}/anime-terbaru/`);
+      } catch {}
     }
 
     const $ = cheerio.load(html);
     const ongoing: AnimeCard[] = [];
 
-    // Parse modern samehadaku post-show items & cards
-    $('article.sw-eps, article.post-item, article').each((i, el) => {
+    // Parse samehadaku post items & cards
+    $('article, .animepost, .animpost, .sw-eps, .post-item').each((i, el) => {
+      const a = $(el).find('a').first();
+      const href = a.attr('href') || '';
       const title = $(el).find('.sw-eps-judul a, h2 a, h3 a, .title a, .entry-title a').first().text().trim() ||
-                    $(el).find('.sw-eps-judul, .title, .entry-title').first().text().trim();
-      const href = $(el).find('a.sw-eps-thumb, a[href*="/nonton/"]').first().attr('href') || $(el).find('a').first().attr('href') || '';
-      const img = $(el).find('img.sw-poster-gbr, img').attr('src') || $(el).find('img').attr('data-src') || '';
-      const thumbTitle = $(el).find('a.sw-eps-thumb').attr('title') || $(el).find('a').first().attr('title') || '';
-      const epMatch = (thumbTitle + ' ' + title).match(/Episode\s+\d+/i);
+                    $(el).find('.sw-eps-judul, .title, .entry-title, h2, h3').first().text().trim() ||
+                    a.attr('title') || '';
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const epMatch = title.match(/Episode\s+\d+/i);
       const ep = epMatch ? epMatch[0] : ($(el).find('.sw-eps-baris a, .ep, .epx, .sw-eps-baris').first().text().trim() || 'Ongoing');
       const slug = extractSlug(href);
 
-      if (title && slug && href.includes('samehadaku.video')) {
+      if (title && slug) {
         ongoing.push({
           title,
           slug,
@@ -1506,7 +1505,7 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
     const isEpisodeSlug = slug.includes('-episode-') || slug.startsWith('nonton-');
     if (isEpisodeSlug) {
       try {
-        const epHtml = await fetchHtml(`${SAMEHADAKU_BASE}/nonton/${slug}/`);
+        const epHtml = await fetchHtml(`${SAMEHADAKU_BASE}/${slug}/`);
         const $ep = cheerio.load(epHtml);
         const parentAnimeHref = $ep('a[href*="/anime/"]').first().attr('href');
         if (parentAnimeHref) {
@@ -1518,8 +1517,8 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
     // Fetch the series detail page
     const candidateUrls = [
       `${SAMEHADAKU_BASE}/anime/${seriesSlug}/`,
-      `${SAMEHADAKU_BASE}/nonton/${slug}/`,
-      `${SAMEHADAKU_BASE}/${slug}/`
+      `${SAMEHADAKU_BASE}/${slug}/`,
+      `${SAMEHADAKU_BASE}/nonton/${slug}/`
     ];
 
     for (const testUrl of candidateUrls) {
@@ -1540,7 +1539,7 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
     }
 
     const rawTitle = $('.entry-title, h1').first().text().trim();
-    if (!rawTitle || rawTitle.toLowerCase().includes('samehadaku') || rawTitle.toLowerCase().includes('page not found') || rawTitle.toLowerCase().includes('404')) {
+    if (!rawTitle || rawTitle.toLowerCase().includes('page not found') || rawTitle.toLowerCase().includes('404')) {
       return null;
     }
 
@@ -1556,14 +1555,14 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
 
     const episodes: EpisodeLink[] = [];
     
-    // Extract all episodes (Samehadaku uses a[href*="/nonton/"] or .lchx a or .eplister)
-    $('a[href*="/nonton/"]').each((i, el) => {
+    // Extract all episodes (Samehadaku uses a[href*="-episode-"], a[href*="/nonton/"], or .episodelist a, .lchx a)
+    $('a[href*="-episode-"], a[href*="/nonton/"], .episodelist a, .lchx a').each((i, el) => {
       const epUrl = $(el).attr('href') || '';
       const epText = $(el).text().trim();
       const epSlug = extractSlug(epUrl);
-      const epMatch = epText.match(/Episode\s+\d+/i);
-      const displayTitle = epMatch ? epMatch[0] : (epText || `Episode`);
-      if (epSlug && !episodes.some(e => e.slug === epSlug)) {
+      if (epSlug && !epSlug.includes('/anime/') && !episodes.some(e => e.slug === epSlug)) {
+        const epMatch = epText.match(/Episode\s+\d+/i);
+        const displayTitle = epMatch ? epMatch[0] : (epText || `Episode`);
         episodes.push({ title: displayTitle, slug: epSlug });
       }
     });
@@ -1590,8 +1589,8 @@ export async function getSamehadakuEpisode(slug: string) {
   try {
     let html = '';
     const candidateUrls = [
-      `${SAMEHADAKU_BASE}/nonton/${slug}/`,
-      `${SAMEHADAKU_BASE}/${slug}/`
+      `${SAMEHADAKU_BASE}/${slug}/`,
+      `${SAMEHADAKU_BASE}/nonton/${slug}/`
     ];
 
     for (const testUrl of candidateUrls) {
@@ -1607,9 +1606,27 @@ export async function getSamehadakuEpisode(slug: string) {
     const title = $('.entry-title, h1').first().text().trim();
     const mirrors: any[] = [];
 
-    // 1. Direct iframe player in page (e.g. putarin.biz, etc.)
+    // 1. Direct Pixeldrain video streams from download sections (Highest priority: zero ads, full speed HTML5 video)
+    $('a[href*="pixeldrain.com"]').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      const idMatch = href.match(/pixeldrain\.com\/u\/([a-zA-Z0-9]+)/);
+      if (idMatch) {
+        const fileId = idMatch[1];
+        const quality = $(el).closest('.download-eps, .dl, li, p').text().match(/\b(360p|480p|720p|1080p)\b/i)?.[0] || 'HD';
+        const streamUrl = `https://pixeldrain.com/api/file/${fileId}`;
+        if (!mirrors.some(m => m.payload.src === streamUrl)) {
+          mirrors.push({
+            quality,
+            playerText: `Pixeldrain (${quality})`,
+            payload: { src: streamUrl, directSrc: streamUrl }
+          });
+        }
+      }
+    });
+
+    // 2. Direct iframe player in page (e.g. putarin.biz, etc.)
     const defaultSrc = $('iframe').attr('src') || $('iframe').attr('data-src') || '';
-    if (defaultSrc) {
+    if (defaultSrc && !defaultSrc.includes('facebook.com')) {
       const normalizedDefault = normalizeUrl(defaultSrc, SAMEHADAKU_BASE);
       mirrors.push({
         quality: 'HD',
@@ -1618,7 +1635,7 @@ export async function getSamehadakuEpisode(slug: string) {
       });
     }
 
-    // 2. Samehadaku .east_player_option elements (ajax mirrors)
+    // 3. Samehadaku .east_player_option elements (ajax mirrors)
     const optionPromises: Promise<void>[] = [];
     $('.east_player_option, #server ul li, .server_option').each((i, el) => {
       const post = $(el).attr('data-post');
@@ -1636,7 +1653,7 @@ export async function getSamehadakuEpisode(slug: string) {
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              'Referer': `${SAMEHADAKU_BASE}/nonton/${slug}/`,
+              'Referer': `${SAMEHADAKU_BASE}/${slug}/`,
               'X-Requested-With': 'XMLHttpRequest'
             },
             body: new URLSearchParams({
@@ -1687,18 +1704,18 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
-    // Match both modern Samehadaku (.sw-kartu-tautan, article.sw-eps) and legacy layout
-    $('a.sw-kartu-tautan, article, .animepost, .animpost').each((i, el) => {
-      const isAnchor = $(el).is('a');
-      const href = isAnchor ? $(el).attr('href') : $(el).find('a').first().attr('href');
+    // Match v2 Samehadaku and legacy layouts
+    $('article, .animepost, .animpost, a.sw-kartu-tautan').each((i, el) => {
+      const a = $(el).is('a') ? $(el) : $(el).find('a').first();
+      const href = a.attr('href') || '';
       if (!href || !href.includes('/anime/')) return;
 
       const title = $(el).find('.sw-kartu-judul').text().trim() ||
-                    $(el).find('.animposx .data .title h2, h2 a, h3 a, .title a, h2, h3').first().text().trim() ||
-                    $(el).attr('title') ||
-                    $(el).find('a').first().attr('title') || '';
+                    $(el).find('h2, h3, .title').first().text().trim() ||
+                    a.attr('title') ||
+                    $(el).attr('title') || '';
 
-      const img = $(el).find('img.sw-poster-gbr, img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
       const ep = $(el).find('.jarvis-eps, .epx, .ep').first().text().trim() || '';
       const slug = extractSlug(href);
 

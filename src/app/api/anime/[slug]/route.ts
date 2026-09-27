@@ -38,10 +38,9 @@ async function smartAnimeSearch(cleanTitle: string, originalSlug = ''): Promise<
     return s;
   };
 
-  const pickBest = (results: any[]): any | null => {
+  const getSortedCandidates = (results: any[]): any[] => {
     const relevant = results.filter(s => isRelevant(s.title));
-    if (relevant.length === 0) return null;
-    return relevant.sort((a, b) => score(b.title) - score(a.title))[0];
+    return relevant.sort((a, b) => score(b.title) - score(a.title));
   };
 
   const queries = [
@@ -53,9 +52,9 @@ async function smartAnimeSearch(cleanTitle: string, originalSlug = ''): Promise<
   // Samehadaku first
   for (const query of queries) {
     const results = await getSamehadakuSearch(query).catch(() => []);
-    const best = pickBest(results);
-    if (best) {
-      const d = await getSamehadakuDetail(best.slug).catch(() => null);
+    const sorted = getSortedCandidates(results);
+    for (const cand of sorted) {
+      const d = await getSamehadakuDetail(cand.slug).catch(() => null);
       if (d && d.episodes && d.episodes.length > 0) return d;
     }
   }
@@ -63,9 +62,9 @@ async function smartAnimeSearch(cleanTitle: string, originalSlug = ''): Promise<
   // Otakudesu fallback
   for (const query of queries) {
     const results = await getOtakudesuSearch(query).catch(() => []);
-    const best = pickBest(results);
-    if (best) {
-      const d = await getOtakudesuDetail(best.slug).catch(() => null);
+    const sorted = getSortedCandidates(results);
+    for (const cand of sorted) {
+      const d = await getOtakudesuDetail(cand.slug).catch(() => null);
       if (d && d.episodes && d.episodes.length > 0) return d;
     }
   }
