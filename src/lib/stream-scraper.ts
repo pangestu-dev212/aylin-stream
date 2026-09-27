@@ -313,7 +313,7 @@ export async function getJikanOngoingAnime(): Promise<AnimeCard[]> {
   const query = `
     query {
       Page(page: 1, perPage: 30) {
-        media(season: ${season}, seasonYear: ${year}, type: ANIME, status: RELEASING, sort: POPULARITY_DESC) {
+        media(season: ${season}, seasonYear: ${year}, type: ANIME, status: RELEASING, sort: POPULARITY_DESC, isAdult: false) {
           id
           title { english romaji }
           coverImage { large extraLarge }
@@ -321,6 +321,7 @@ export async function getJikanOngoingAnime(): Promise<AnimeCard[]> {
           status
           siteUrl
           genres
+          isAdult
         }
       }
     }
@@ -338,19 +339,21 @@ export async function getJikanOngoingAnime(): Promise<AnimeCard[]> {
     const json = await res.json();
     const data = json?.data?.Page?.media || [];
 
-    const animeList: AnimeCard[] = data.map((a: any) => {
-      const title = a.title?.english || a.title?.romaji || 'Unknown';
-      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      return {
-        title,
-        slug: `anilist-${a.id}-${slug}`,
-        url: a.siteUrl || `https://anilist.co/anime/${a.id}`,
-        img: a.coverImage?.extraLarge || a.coverImage?.large || '',
-        ep: a.episodes ? `${a.episodes} Ep` : 'Ongoing',
-        type: 'anime' as const,
-        status: 'Ongoing',
-      };
-    });
+    const animeList: AnimeCard[] = data
+      .filter((a: any) => !a.isAdult && !a.genres?.some((g: string) => ['Hentai', 'Erotica'].includes(g)))
+      .map((a: any) => {
+        const title = a.title?.english || a.title?.romaji || 'Unknown';
+        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        return {
+          title,
+          slug: `anilist-${a.id}-${slug}`,
+          url: a.siteUrl || `https://anilist.co/anime/${a.id}`,
+          img: a.coverImage?.extraLarge || a.coverImage?.large || '',
+          ep: a.episodes ? `${a.episodes} Ep` : 'Ongoing',
+          type: 'anime' as const,
+          status: 'Ongoing',
+        };
+      });
 
     if (animeList.length > 0) {
       jikanOngoingCache = { data: animeList, timestamp: now };
@@ -361,14 +364,18 @@ export async function getJikanOngoingAnime(): Promise<AnimeCard[]> {
 
     // Secondary fallback: try Jikan API
     try {
-      const jikanRes = await fetch('https://api.jikan.moe/v4/seasons/now?filter=tv&limit=25', {
+      const jikanRes = await fetch('https://api.jikan.moe/v4/seasons/now?filter=tv&limit=25&sfw=true', {
         headers: { 'Accept': 'application/json' },
         signal: AbortSignal.timeout(8000),
       });
       if (jikanRes.ok) {
         const jikanJson = await jikanRes.json();
         const jikanList: AnimeCard[] = (jikanJson.data || [])
-          .filter((a: any) => a.airing === true)
+          .filter((a: any) => 
+            a.airing === true && 
+            a.rating !== 'Rx - Hentai' && 
+            !a.genres?.some((g: any) => g.name === 'Hentai' || g.name === 'Erotica')
+          )
           .map((a: any) => ({
             title: a.title_english || a.title,
             slug: `jikan-${a.mal_id}-${(a.title_english || a.title).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
