@@ -555,12 +555,15 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         hostname === host || hostname.endsWith('.' + host)
       ) && !hostname.includes('gdriveplayer') && !hostname.includes('pixeldrain');
 
+      if (normalizedSrc.includes('pixeldrain.com')) {
+        return `/api/video-proxy?url=${encodeURIComponent(normalizedSrc)}`;
+      }
+
       if (needsProxy) {
-        // Direct video files (.mp4, .mkv, pixeldrain direct file api) don't need HTML proxying
+        // Direct video files (.mp4, .mkv) don't need HTML proxying
         if (
           normalizedSrc.endsWith('.mp4') || normalizedSrc.includes('.mp4?') ||
-          normalizedSrc.endsWith('.mkv') || normalizedSrc.includes('.mkv?') ||
-          normalizedSrc.includes('pixeldrain.com/api/file/')
+          normalizedSrc.endsWith('.mkv') || normalizedSrc.includes('.mkv?')
         ) {
           return normalizedSrc;
         }
@@ -1443,21 +1446,29 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
               ) : playerSrc ? (
                 <>
                   {((activeMirror?.payload?.directSrc && (
-
                       activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
                       activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
-                      activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/')
+                      activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/') ||
+                      activeMirror.payload.directSrc.includes('/api/video-proxy')
                     )) ||
                     playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?') ||
                     playerSrc.endsWith('.mkv') || playerSrc.includes('.mkv?') ||
-                    playerSrc.includes('pixeldrain.com/api/file/')) ? (
+                    playerSrc.includes('pixeldrain.com/api/file/') ||
+                    playerSrc.includes('/api/video-proxy')) ? (
                     <video
                       key={playerSrc}
-                      src={(activeMirror?.payload?.directSrc && (
-                        activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
-                        activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
-                        activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/')
-                      )) ? activeMirror.payload.directSrc : playerSrc}
+                      src={(() => {
+                        const raw = (activeMirror?.payload?.directSrc && (
+                          activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
+                          activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
+                          activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/') ||
+                          activeMirror.payload.directSrc.includes('/api/video-proxy')
+                        )) ? activeMirror.payload.directSrc : playerSrc;
+                        if (raw.includes('pixeldrain.com') && !raw.includes('/api/video-proxy')) {
+                          return `/api/video-proxy?url=${encodeURIComponent(raw)}`;
+                        }
+                        return raw;
+                      })()}
                       controls
                       autoPlay
                       playsInline

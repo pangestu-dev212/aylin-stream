@@ -1656,10 +1656,11 @@ export async function getSamehadakuEpisode(slug: string) {
     for (const item of chosenList) {
       if (!seenUrls.has(item.streamUrl)) {
         seenUrls.add(item.streamUrl);
+        const proxyUrl = `/api/video-proxy?url=${encodeURIComponent(item.streamUrl)}`;
         mirrors.push({
           quality: item.quality,
-          playerText: `Pixeldrain MP4`,
-          payload: { src: item.streamUrl, directSrc: item.streamUrl }
+          playerText: `Pixeldrain MP4 (${item.quality})`,
+          payload: { src: proxyUrl, directSrc: proxyUrl }
         });
       }
     }
