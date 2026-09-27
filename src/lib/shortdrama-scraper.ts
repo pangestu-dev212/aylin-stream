@@ -16,6 +16,7 @@ export interface ShortDramaEpisode {
   episodeNo: number;
   name: string;
   streamUrl: string;
+  rawUrl?: string;
   cover: string;
   isCharge: boolean;
 }
@@ -238,15 +239,16 @@ export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDet
         }
       }
 
-      // Format decrypt streamUrl
+      // Assign streamUrl through video-proxy to bypass 429 rate limits & CORS
       const streamUrl = rawVideoUrl
-        ? `https://api.sansekai.my.id/api/dramabox/decrypt-video?url=${encodeURIComponent(rawVideoUrl)}`
+        ? `/api/video-proxy?url=${encodeURIComponent(rawVideoUrl)}`
         : '';
 
       return {
         episodeNo,
         name,
         streamUrl,
+        rawUrl: rawVideoUrl,
         cover: epCover,
         isCharge,
       };

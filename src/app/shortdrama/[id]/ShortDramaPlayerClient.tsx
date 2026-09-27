@@ -24,17 +24,70 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const episodes = detail.episodes || [];
   const currentEp = episodes[currentEpIndex] || null;
+  const [currentStreamSrc, setCurrentStreamSrc] = useState(currentEp?.streamUrl || '');
+
+  // Sync streamUrl when episode changes
+  useEffect(() => {
+    if (currentEp) {
+      setCurrentStreamSrc(currentEp.streamUrl);
+      setVideoError(false);
+      setIsBuffering(true);
+    }
+  }, [currentEpIndex, currentEp]);
+
+  // Robust play handler respecting browser autoplay policies
+  useEffect(() => {
+    if (videoRef.current && currentStreamSrc) {
+      videoRef.current.playbackRate = playbackSpeed;
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            setIsBuffering(false);
+          })
+          .catch(() => {
+            // Autoplay with audio was blocked: mute and retry
+            if (videoRef.current) {
+              videoRef.current.muted = true;
+              setIsMuted(true);
+              videoRef.current.play().then(() => {
+                setIsPlaying(true);
+                setIsBuffering(false);
+              }).catch(() => {
+                setIsPlaying(false);
+                setIsBuffering(false);
+              });
+            }
+          });
+      }
+    }
+  }, [currentStreamSrc, currentEpIndex, playbackSpeed]);
 
   // Auto-play next episode on end
   const handleEnded = () => {
     if (currentEpIndex < episodes.length - 1) {
       setCurrentEpIndex(prev => prev + 1);
+    }
+  };
+
+  // Error recovery: switch to raw CDN URL if proxy fails
+  const handleVideoError = () => {
+    if (currentEp?.rawUrl && currentStreamSrc !== currentEp.rawUrl) {
+      console.warn('[ShortDrama] Proxy stream failed, falling back to direct rawUrl...');
+      setCurrentStreamSrc(currentEp.rawUrl);
+    } else {
+      setVideoError(true);
+      setIsPlaying(false);
+      setIsBuffering(false);
     }
   };
 
@@ -55,8 +108,13 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
   const togglePlay = () => {
     if (videoRef.current) {
       if (videoRef.current.paused) {
-        videoRef.current.play();
-        setIsPlaying(true);
+        videoRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch(() => {
+          videoRef.current!.muted = true;
+          setIsMuted(true);
+          videoRef.current!.play().catch(() => {});
+        });
       } else {
         videoRef.current.pause();
         setIsPlaying(false);
@@ -190,31 +248,55 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
             ref={containerRef}
             className="relative w-full max-w-[360px] sm:max-w-[400px] aspect-[9/16] bg-black rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800/80 group flex items-center justify-center"
           >
-            {currentEp?.streamUrl ? (
-              <video
-                ref={videoRef}
-                key={currentEp.streamUrl}
-                src={currentEp.streamUrl}
-                autoPlay
-                playsInline
-                onEnded={handleEnded}
-                onTimeUpdate={handleTimeUpdate}
-                onClick={togglePlay}
-                poster={currentEp.cover || detail.cover}
-                className="w-full h-full object-cover cursor-pointer"
-              />
+            {currentStreamSrc && !videoError ? (
+              <>
+                <video
+                  ref={videoRef}
+                  key={currentStreamSrc}
+                  src={currentStreamSrc}
+                  playsInline
+                  onEnded={handleEnded}
+                  onTimeUpdate={handleTimeUpdate}
+                  onWaiting={() => setIsBuffering(true)}
+                  onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
+                  onPause={() => setIsPlaying(false)}
+                  onError={handleVideoError}
+                  onClick={togglePlay}
+                  poster={currentEp?.cover || detail.cover}
+                  className="w-full h-full object-cover cursor-pointer"
+                />
+
+                {/* Buffering Indicator */}
+                {isBuffering && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none z-10">
+                    <div className="w-10 h-10 border-3 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="p-6 text-center text-slate-500">
-                <Smartphone size={40} className="mx-auto mb-2 text-slate-700" />
-                <p className="text-xs">Stream video belum tersedia.</p>
+              <div className="p-6 text-center text-slate-400 flex flex-col items-center justify-center z-10">
+                <Smartphone size={40} className="mx-auto mb-2 text-rose-500/60" />
+                <p className="text-xs font-semibold mb-3">
+                  {videoError ? 'Gagal memuat video stream episode ini.' : 'Stream video belum tersedia.'}
+                </p>
+                <button
+                  onClick={() => {
+                    setVideoError(false);
+                    if (currentEp?.rawUrl) setCurrentStreamSrc(currentEp.rawUrl);
+                    else if (currentEp?.streamUrl) setCurrentStreamSrc(currentEp.streamUrl);
+                  }}
+                  className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-lg"
+                >
+                  <RotateCcw size={13} /> Coba Putar Ulang
+                </button>
               </div>
             )}
 
             {/* Tap to Play / Pause Big Center Icon */}
-            {!isPlaying && (
+            {!isPlaying && !isBuffering && !videoError && (
               <button
                 onClick={togglePlay}
-                className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer"
+                className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer z-10"
               >
                 <div className="w-16 h-16 rounded-full bg-rose-500/90 text-white flex items-center justify-center shadow-2xl glow-rose scale-105 transition-transform">
                   <Play size={28} fill="white" className="ml-1" />
@@ -227,12 +309,22 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
               <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-rose-300 border border-white/10">
                 {currentEp?.name || `EP ${currentEpIndex + 1}`}
               </span>
-              <button
-                onClick={toggleMute}
-                className="pointer-events-auto p-2 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/10 hover:bg-black/80 transition-colors cursor-pointer"
-              >
-                {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-              </button>
+              <div className="flex items-center gap-1.5 pointer-events-auto">
+                {isMuted && isPlaying && (
+                  <button
+                    onClick={toggleMute}
+                    className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-rose-600 text-white shadow-lg animate-bounce cursor-pointer"
+                  >
+                    <VolumeX size={12} /> Buka Suara
+                  </button>
+                )}
+                <button
+                  onClick={toggleMute}
+                  className="p-2 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/10 hover:bg-black/80 transition-colors cursor-pointer"
+                >
+                  {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                </button>
+              </div>
             </div>
 
             {/* Bottom Overlay Controls */}
