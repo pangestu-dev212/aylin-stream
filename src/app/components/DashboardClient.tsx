@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   Play, Search, Star, Film, Tv, Clock, X, ArrowUpRight,
   Bell, BellOff, User, Plus, Trash2, ChevronDown, Palette,
-  RefreshCw, Copy, Check, Link2
+  RefreshCw, Copy, Check, Link2, BookOpen
 } from 'lucide-react';
 import { AnimeCard } from '@/lib/stream-scraper';
+import { MangaCard } from '@/lib/manga-scraper';
 import { useTheme, THEMES } from '../context/ThemeContext';
 import { isSupabaseActive } from '@/lib/supabaseClient';
 import {
@@ -23,15 +24,16 @@ interface DashboardClientProps {
   initialAnime: AnimeCard[];
   initialDonghua: AnimeCard[];
   initialDrama: AnimeCard[];
+  initialManga?: MangaCard[];
 }
 
-export default function DashboardClient({ initialAnime, initialDonghua, initialDrama }: DashboardClientProps) {
+export default function DashboardClient({ initialAnime, initialDonghua, initialDrama, initialManga = [] }: DashboardClientProps) {
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<AnimeCard[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchFilter, setSearchFilter] = useState<'ALL' | 'anime' | 'donghua' | 'drama'>('ALL');
+  const [searchFilter, setSearchFilter] = useState<'ALL' | 'anime' | 'donghua' | 'drama' | 'manga'>('ALL');
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Bookmarks state
@@ -51,6 +53,15 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
   const [dramaSort, setDramaSort] = useState<'latest' | 'az'>('latest');
   const [dramaGenre, setDramaGenre] = useState('ALL');
   const [dramaStatus, setDramaStatus] = useState<'ALL' | 'Ongoing' | 'Completed'>('ALL');
+
+  // Manga filter state
+  const [mangaFilter, setMangaFilter] = useState<'all' | 'colored' | 'manga' | 'manhwa'>('all');
+  const filteredManga = useMemo(() => {
+    if (mangaFilter === 'colored') return initialManga.filter(m => m.isColored);
+    if (mangaFilter === 'manga') return initialManga.filter(m => m.type === 'manga' && !m.isColored);
+    if (mangaFilter === 'manhwa') return initialManga.filter(m => m.type === 'manhwa' || m.type === 'manhua');
+    return initialManga;
+  }, [initialManga, mangaFilter]);
 
   // Filter & Sort Helper
   const filterAndSortList = (
@@ -955,6 +966,9 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
             <a href="#anime" className="hover:text-violet-400 transition-colors">Anime</a>
             <a href="#donghua" className="hover:text-violet-400 transition-colors">Donghua</a>
             <a href="#drama" className="hover:text-violet-400 transition-colors">Drama &amp; Film</a>
+            <a href="#manga" className="hover:text-amber-400 transition-colors flex items-center gap-1">
+              <BookOpen size={14} className="text-amber-400" /> Komik
+            </a>
             {bookmarks.length > 0 && (
               <a href="#bookmarks" className="hover:text-violet-400 transition-colors flex items-center gap-1">
                 <Star size={14} className="fill-violet-400 text-violet-400" /> Bookmarks
@@ -1020,7 +1034,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                 {/* Search category filters */}
                 {!searchLoading && searchResults.length > 0 && (
                   <div className="flex items-center gap-1.5 pb-2 border-b border-slate-800/80 overflow-x-auto scrollbar-none">
-                    {(['ALL', 'anime', 'donghua', 'drama'] as const).map((filter) => {
+                    {(['ALL', 'anime', 'donghua', 'drama', 'manga'] as const).map((filter) => {
                       const count = filter === 'ALL' 
                         ? searchResults.length 
                         : searchResults.filter(item => item.type === filter).length;
@@ -1071,7 +1085,7 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                       return filtered.map((item) => (
                         <Link
                           key={`${item.type}-${item.slug}`}
-                          href={`/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
+                          href={item.type === 'manga' ? `/manga/${item.slug}` : `/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`}
                           className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-xl transition-colors group"
                         >
                           <div className="relative w-12 h-16 rounded-md overflow-hidden bg-slate-800 flex-shrink-0">
@@ -1092,7 +1106,9 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                                   ? 'bg-fuchsia-950 text-fuchsia-400 border border-fuchsia-800/30' 
                                   : item.type === 'drama'
                                     ? 'bg-rose-950 text-rose-400 border border-rose-800/30'
-                                    : 'bg-violet-950 text-violet-400 border border-violet-800/30'
+                                    : item.type === 'manga'
+                                      ? 'bg-amber-950 text-amber-400 border border-amber-800/30'
+                                      : 'bg-violet-950 text-violet-400 border border-violet-800/30'
                               }`}>
                                 {item.type}
                               </span>
@@ -1808,6 +1824,135 @@ export default function DashboardClient({ initialAnime, initialDonghua, initialD
                     <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
                       <Clock size={10} /> {drama.ep}
                     </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 7. Ongoing Manga & Komik Grid (Komikindo) */}
+      <section id="manga" className="mt-16 px-4 sm:px-8 flex flex-col gap-5 scroll-mt-24">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-900 pb-3 gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-600/10 border border-amber-500/20 rounded-xl text-amber-400">
+              <BookOpen size={20} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-slate-100">Komik &amp; Manga Terupdate</h2>
+              <p className="text-xs text-slate-500">Manga Jepang, Manhwa Korea &amp; Komik Berwarna sub Indo</p>
+            </div>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 p-1 bg-slate-900/80 border border-slate-800 rounded-full text-xs font-bold overflow-x-auto scrollbar-none max-w-full">
+            <button
+              onClick={() => setMangaFilter('all')}
+              className={`px-3 py-1.5 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                mangaFilter === 'all'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🌟 Semua ({initialManga.length})
+            </button>
+            <button
+              onClick={() => setMangaFilter('colored')}
+              className={`px-3 py-1.5 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                mangaFilter === 'colored'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🎨 Full Color
+            </button>
+            <button
+              onClick={() => setMangaFilter('manga')}
+              className={`px-3 py-1.5 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                mangaFilter === 'manga'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📖 Manga B&amp;W
+            </button>
+            <button
+              onClick={() => setMangaFilter('manhwa')}
+              className={`px-3 py-1.5 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                mangaFilter === 'manhwa'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🇰🇷 Manhwa / Manhua
+            </button>
+          </div>
+        </div>
+
+        {filteredManga.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-2xl">
+            <BookOpen size={40} className="mb-2 text-slate-600" />
+            <p className="text-sm">Tidak ada komik di kategori ini saat ini.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+            {filteredManga.map((manga, idx) => (
+              <div 
+                key={`manga-${manga.slug}-${idx}`}
+                className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-amber-500/30"
+              >
+                <Link href={`/manga/${manga.slug}`} className="relative aspect-[3/4] bg-slate-900 overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={manga.img ? `/api/image-proxy?url=${encodeURIComponent(manga.img)}` : undefined}
+                    alt={manga.title}
+                    className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-amber-500 flex items-center justify-center text-white shadow-lg shadow-amber-500/30">
+                      <BookOpen size={16} className="ml-0.5" />
+                    </div>
+                  </div>
+                  {/* Badges */}
+                  <div className="absolute top-3 left-3 flex flex-col gap-1">
+                    <span className="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase border bg-amber-950/90 text-amber-300 border-amber-700/30 w-fit">
+                      {manga.type}
+                    </span>
+                    {manga.isColored && (
+                      <span className="text-[8px] px-1.5 py-0.5 rounded-full font-extrabold uppercase bg-rose-500/90 text-white w-fit shadow-sm">
+                        Color
+                      </span>
+                    )}
+                  </div>
+                  {manga.rating && (
+                    <span className="absolute top-3 right-3 text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-slate-900/90 text-yellow-400 border border-yellow-500/30 flex items-center gap-0.5">
+                      ★ {manga.rating}
+                    </span>
+                  )}
+                </Link>
+                <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
+                  <Link href={`/manga/${manga.slug}`} className="font-bold text-sm text-slate-200 line-clamp-2 leading-snug group-hover:text-amber-400 transition-colors">
+                    {manga.title}
+                  </Link>
+                  {manga.latestChapter && (
+                    <div className="flex items-center justify-between text-[11px] mt-auto pt-1 border-t border-slate-900/60">
+                      {manga.chapterSlug ? (
+                        <Link 
+                          href={`/manga/read/${manga.chapterSlug}`}
+                          className="font-bold text-amber-400 hover:text-amber-300 transition-colors truncate"
+                        >
+                          {manga.latestChapter}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-slate-500 truncate">
+                          {manga.latestChapter}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-500 flex items-center gap-0.5">
+                        <Clock size={10} /> Baru
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>

@@ -265,7 +265,7 @@ export interface AnimeCard {
   img: string;
   ep?: string;
   day?: string;
-  type: 'anime' | 'donghua' | 'drama';
+  type: 'anime' | 'donghua' | 'drama' | 'manga';
   source?: string;
 }
 

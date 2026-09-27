@@ -7,6 +7,7 @@ import {
   getAnimeXinSearch, 
   getDonghuastreamSearch 
 } from '@/lib/stream-scraper';
+import { searchManga } from '@/lib/manga-scraper';
 
 export async function GET(req: NextRequest) {
   try {
@@ -31,6 +32,10 @@ export async function GET(req: NextRequest) {
       const results = await getDonghuastreamSearch(query).catch(() => []);
       return NextResponse.json({ success: true, results });
     }
+    if (source === 'manga') {
+      const results = await searchManga(query).catch(() => []);
+      return NextResponse.json({ success: true, results: results.map(r => ({ ...r, type: 'manga' as const })) });
+    }
 
     // Fetch from all concurrently
     const [
@@ -39,23 +44,34 @@ export async function GET(req: NextRequest) {
       anichinResults,
       animexinResults,
       donghuaStreamResults,
-      dramaResults
+      dramaResults,
+      mangaResults
     ] = await Promise.all([
       getOtakudesuSearch(query).catch(() => []),
       getSamehadakuSearch(query).catch(() => []),
       getAnichinSearch(query).catch(() => []),
       getAnimeXinSearch(query).catch(() => []),
       getDonghuastreamSearch(query).catch(() => []),
-      getJuraganfilmSearch(query).catch(() => [])
+      getJuraganfilmSearch(query).catch(() => []),
+      searchManga(query).catch(() => [])
     ]);
 
     const mappedDrama = dramaResults.map(item => ({ ...item, type: 'drama' as const }));
+    const mappedManga = mangaResults.map(item => ({ 
+      title: item.title, 
+      slug: item.slug, 
+      url: item.url, 
+      img: item.img, 
+      ep: item.latestChapter, 
+      type: 'manga' as const 
+    }));
 
     // Concatenate, placing primary sources first so they are preferred during deduplication
     const combinedRaw = [
       ...otakuResults,
       ...anichinResults,
       ...mappedDrama,
+      ...mappedManga,
       ...sameResults,
       ...animexinResults,
       ...donghuaStreamResults
