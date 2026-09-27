@@ -1,6 +1,7 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getShortDramaDetail } from '@/lib/shortdrama-scraper';
+import { isContentSafe } from '@/lib/content-filter';
 import ShortDramaPlayerClient from './ShortDramaPlayerClient';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const bookId = id.split('-')[0];
   const detail = await getShortDramaDetail(bookId);
 
-  if (!detail) {
+  if (!detail || !isContentSafe(detail)) {
     return { title: 'Drama Tidak Ditemukan - Aylin Stream' };
   }
 
@@ -34,7 +35,7 @@ export default async function ShortDramaDetailPage({ params }: Props) {
   const bookId = id.split('-')[0];
   const detail = await getShortDramaDetail(bookId);
 
-  if (!detail) {
+  if (!detail || !isContentSafe(detail)) {
     notFound();
   }
 

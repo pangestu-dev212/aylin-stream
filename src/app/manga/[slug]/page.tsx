@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { getMangaDetail } from '@/lib/manga-scraper';
 import MangaDetailClient from './MangaDetailClient';
 
+export const dynamic = 'force-dynamic';
+
 interface Props {
   params: Promise<{ slug: string }>;
 }

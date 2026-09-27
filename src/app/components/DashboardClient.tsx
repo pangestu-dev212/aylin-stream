@@ -10,6 +10,7 @@ import {
 import { AnimeCard } from '@/lib/stream-scraper';
 import { MangaCard } from '@/lib/manga-scraper';
 import { ShortDramaCard } from '@/lib/shortdrama-scraper';
+import { isSafeQuery, filterSafeList } from '@/lib/content-filter';
 import { useTheme, THEMES } from '../context/ThemeContext';
 import { isSupabaseActive } from '@/lib/supabaseClient';
 import {
@@ -36,6 +37,13 @@ export default function DashboardClient({
   initialManga = [],
   initialShortDrama = []
 }: DashboardClientProps) {
+  // Client-side content safety memoization
+  const safeAnime = useMemo(() => filterSafeList(initialAnime), [initialAnime]);
+  const safeDonghua = useMemo(() => filterSafeList(initialDonghua), [initialDonghua]);
+  const safeDrama = useMemo(() => filterSafeList(initialDrama), [initialDrama]);
+  const safeManga = useMemo(() => filterSafeList(initialManga), [initialManga]);
+  const safeShortDrama = useMemo(() => filterSafeList(initialShortDrama), [initialShortDrama]);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<AnimeCard[]>([]);
@@ -65,11 +73,11 @@ export default function DashboardClient({
   // Manga filter state
   const [mangaFilter, setMangaFilter] = useState<'all' | 'colored' | 'manga' | 'manhwa'>('all');
   const filteredManga = useMemo(() => {
-    if (mangaFilter === 'colored') return initialManga.filter(m => m.isColored);
-    if (mangaFilter === 'manga') return initialManga.filter(m => m.type === 'manga' && !m.isColored);
-    if (mangaFilter === 'manhwa') return initialManga.filter(m => m.type === 'manhwa' || m.type === 'manhua');
-    return initialManga;
-  }, [initialManga, mangaFilter]);
+    if (mangaFilter === 'colored') return safeManga.filter(m => m.isColored);
+    if (mangaFilter === 'manga') return safeManga.filter(m => m.type === 'manga' && !m.isColored);
+    if (mangaFilter === 'manhwa') return safeManga.filter(m => m.type === 'manhwa' || m.type === 'manhua');
+    return safeManga;
+  }, [safeManga, mangaFilter]);
 
   // Filter & Sort Helper
   const filterAndSortList = (
@@ -849,9 +857,10 @@ export default function DashboardClient({
       clearTimeout(searchTimeoutRef.current);
     }
 
-    if (!query.trim()) {
+    if (!query.trim() || !isSafeQuery(query)) {
       setSearchResults([]);
-      setSearchOpen(false);
+      setSearchLoading(false);
+      setSearchOpen(Boolean(query.trim()));
       return;
     }
 
@@ -863,7 +872,7 @@ export default function DashboardClient({
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
         const json = await res.json();
         if (json.success) {
-          setSearchResults(json.results);
+          setSearchResults(filterSafeList(json.results));
         }
       } catch (err) {
         console.error(err);
@@ -945,9 +954,9 @@ export default function DashboardClient({
   // Select a random ongoing show and navigate to watch page
   const handleSurpriseMe = () => {
     const allOngoing = [
-      ...initialAnime.map(a => ({ ...a, type: 'anime' as const })),
-      ...initialDonghua.map(d => ({ ...d, type: 'donghua' as const })),
-      ...initialDrama.map(dr => ({ ...dr, type: 'drama' as const }))
+      ...safeAnime.map(a => ({ ...a, type: 'anime' as const })),
+      ...safeDonghua.map(d => ({ ...d, type: 'donghua' as const })),
+      ...safeDrama.map(dr => ({ ...dr, type: 'drama' as const }))
     ];
     if (allOngoing.length === 0) {
       alert("Tidak ada konten ongoing yang tersedia untuk diputar acak.");
@@ -1674,20 +1683,20 @@ export default function DashboardClient({
             </div>
           </div>
           <span className="text-xs font-semibold text-slate-400 bg-slate-900/60 border border-slate-800 px-3 py-1 rounded-full">
-            {initialAnime.length} Seri Aktif
+            {safeAnime.length} Seri Aktif
           </span>
         </div>
 
         {renderFilterBar(animeLetter, setAnimeLetter, animeSort, setAnimeSort, animeGenre, setAnimeGenre, animeStatus, setAnimeStatus, 'bg-violet-500')}
 
-        {filterAndSortList(initialAnime, animeLetter, animeSort, animeGenre, animeStatus).length === 0 ? (
+        {filterAndSortList(safeAnime, animeLetter, animeSort, animeGenre, animeStatus).length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-2xl">
             <Film size={40} className="mb-2 text-slate-600" />
             <p className="text-sm">Tidak ada tontonan dengan filter kategori &amp; abjad ini.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-            {filterAndSortList(initialAnime, animeLetter, animeSort, animeGenre, animeStatus).map((anime, idx) => (
+            {filterAndSortList(safeAnime, animeLetter, animeSort, animeGenre, animeStatus).map((anime, idx) => (
               <div 
                 key={`anime-${anime.slug}-${idx}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-violet-500/30"
@@ -1739,20 +1748,20 @@ export default function DashboardClient({
             </div>
           </div>
           <span className="text-xs font-semibold text-slate-400 bg-slate-900/60 border border-slate-800 px-3 py-1 rounded-full">
-            {initialDonghua.length} Seri Aktif
+            {safeDonghua.length} Seri Aktif
           </span>
         </div>
 
         {renderFilterBar(donghuaLetter, setDonghuaLetter, donghuaSort, setDonghuaSort, donghuaGenre, setDonghuaGenre, donghuaStatus, setDonghuaStatus, 'bg-fuchsia-500')}
 
-        {filterAndSortList(initialDonghua, donghuaLetter, donghuaSort, donghuaGenre, donghuaStatus).length === 0 ? (
+        {filterAndSortList(safeDonghua, donghuaLetter, donghuaSort, donghuaGenre, donghuaStatus).length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-2xl">
             <Film size={40} className="mb-2 text-slate-600" />
             <p className="text-sm">Tidak ada tontonan dengan filter kategori &amp; abjad ini.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-            {filterAndSortList(initialDonghua, donghuaLetter, donghuaSort, donghuaGenre, donghuaStatus).map((donghua, idx) => (
+            {filterAndSortList(safeDonghua, donghuaLetter, donghuaSort, donghuaGenre, donghuaStatus).map((donghua, idx) => (
               <div 
                 key={`donghua-${donghua.slug}-${idx}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-fuchsia-500/30"
@@ -1799,20 +1808,20 @@ export default function DashboardClient({
             </div>
           </div>
           <span className="text-xs font-semibold text-slate-400 bg-slate-900/60 border border-slate-800 px-3 py-1 rounded-full">
-            {initialDrama.length} Seri Aktif
+            {safeDrama.length} Seri Aktif
           </span>
         </div>
 
         {renderFilterBar(dramaLetter, setDramaLetter, dramaSort, setDramaSort, dramaGenre, setDramaGenre, dramaStatus, setDramaStatus, 'bg-rose-500')}
 
-        {filterAndSortList(initialDrama, dramaLetter, dramaSort, dramaGenre, dramaStatus).length === 0 ? (
+        {filterAndSortList(safeDrama, dramaLetter, dramaSort, dramaGenre, dramaStatus).length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-2xl">
             <Film size={40} className="mb-2 text-slate-600" />
             <p className="text-sm">Tidak ada drama/film dengan filter kategori &amp; abjad ini.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-            {filterAndSortList(initialDrama, dramaLetter, dramaSort, dramaGenre, dramaStatus).map((drama, idx) => (
+            {filterAndSortList(safeDrama, dramaLetter, dramaSort, dramaGenre, dramaStatus).map((drama, idx) => (
               <div 
                 key={`drama-${drama.slug}-${idx}`}
                 className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 hover:border-rose-500/30"
@@ -2001,14 +2010,14 @@ export default function DashboardClient({
           </Link>
         </div>
 
-        {initialShortDrama.length === 0 ? (
+        {safeShortDrama.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-slate-500 bg-slate-950/20 border border-slate-900/60 rounded-2xl">
             <Smartphone size={40} className="mb-2 text-slate-600" />
             <p className="text-sm">Sedang memuat drama pendek...</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-5">
-            {initialShortDrama.slice(0, 12).map((drama, idx) => (
+            {safeShortDrama.slice(0, 12).map((drama, idx) => (
               <Link
                 key={`shortdrama-${drama.bookId}-${idx}`}
                 href={`/shortdrama/${drama.slug}`}

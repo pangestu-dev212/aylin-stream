@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMangaDetail } from '@/lib/manga-scraper';
+import { isContentSafe } from '@/lib/content-filter';
 
-export const revalidate = 300;
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: NextRequest,
@@ -14,7 +15,7 @@ export async function GET(
     }
 
     const detail = await getMangaDetail(slug);
-    if (!detail) {
+    if (!detail || !isContentSafe(detail)) {
       return NextResponse.json({ success: false, error: 'Manga not found' }, { status: 404 });
     }
 

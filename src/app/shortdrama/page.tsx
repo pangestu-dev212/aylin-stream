@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import { getShortDramaPopular, getShortDramaLatest } from '@/lib/shortdrama-scraper';
+import { filterSafeList } from '@/lib/content-filter';
 import ShortDramaCatalogClient from './ShortDramaCatalogClient';
 
 export const revalidate = 300;
@@ -15,5 +16,5 @@ export default async function ShortDramaPage() {
     getShortDramaLatest().catch(() => []),
   ]);
 
-  return <ShortDramaCatalogClient initialPopular={popular} initialLatest={latest} />;
+  return <ShortDramaCatalogClient initialPopular={filterSafeList(popular)} initialLatest={filterSafeList(latest)} />;
 }

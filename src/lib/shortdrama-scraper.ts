@@ -1,3 +1,5 @@
+import { isContentSafe, isSafeQuery, filterSafeList } from '@/lib/content-filter';
+
 const SANSEKAI_BASE = 'https://api.sansekai.my.id/api';
 
 const DEFAULT_HEADERS = {
@@ -97,10 +99,11 @@ export async function getShortDramaPopular(): Promise<ShortDramaCard[]> {
       };
     });
 
-    if (cards.length > 0) {
-      setCache(cacheKey, cards);
+    const safeCards = filterSafeList(cards);
+    if (safeCards.length > 0) {
+      setCache(cacheKey, safeCards);
     }
-    return cards;
+    return safeCards;
   } catch (err) {
     console.error('Error fetching popular short dramas:', err);
     return [];
@@ -141,10 +144,11 @@ export async function getShortDramaLatest(): Promise<ShortDramaCard[]> {
       };
     });
 
-    if (cards.length > 0) {
-      setCache(cacheKey, cards);
+    const safeCards = filterSafeList(cards);
+    if (safeCards.length > 0) {
+      setCache(cacheKey, safeCards);
     }
-    return cards;
+    return safeCards;
   } catch (err) {
     console.error('Error fetching latest short dramas:', err);
     return [];
@@ -156,7 +160,7 @@ export async function getShortDramaLatest(): Promise<ShortDramaCard[]> {
  */
 export async function searchShortDrama(query: string): Promise<ShortDramaCard[]> {
   const cleanQ = query.trim().toLowerCase();
-  if (!cleanQ) return [];
+  if (!cleanQ || !isSafeQuery(cleanQ)) return [];
 
   const cacheKey = `shortdrama:search:${cleanQ}`;
   const cached = getCached<ShortDramaCard[]>(cacheKey);
@@ -187,10 +191,11 @@ export async function searchShortDrama(query: string): Promise<ShortDramaCard[]>
       };
     });
 
-    if (cards.length > 0) {
-      setCache(cacheKey, cards);
+    const safeCards = filterSafeList(cards);
+    if (safeCards.length > 0) {
+      setCache(cacheKey, safeCards);
     }
-    return cards;
+    return safeCards;
   } catch (err) {
     console.error('Error searching short dramas:', err);
     return [];
@@ -318,6 +323,12 @@ export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDet
       type: 'shortdrama',
       episodes,
     };
+
+    // Guard: Block if drama matches NSFW or adult tropes
+    if (!isContentSafe(detail)) {
+      console.warn(`[ShortDrama] Blocked NSFW short drama: ${cleanId} - ${title}`);
+      return null;
+    }
 
     setCache(cacheKey, detail);
     return detail;

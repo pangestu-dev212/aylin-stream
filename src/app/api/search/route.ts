@@ -9,6 +9,7 @@ import {
 } from '@/lib/stream-scraper';
 import { searchManga } from '@/lib/manga-scraper';
 import { searchShortDrama } from '@/lib/shortdrama-scraper';
+import { isSafeQuery, filterSafeList } from '@/lib/content-filter';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,30 +17,32 @@ export async function GET(req: NextRequest) {
     const query = searchParams.get('q') || '';
     const source = searchParams.get('source') || '';
 
-    if (!query) {
+    if (!query || !isSafeQuery(query)) {
       return NextResponse.json({ success: true, results: [] });
     }
 
     // Direct single source search
     if (source === 'samehadaku') {
       const results = await getSamehadakuSearch(query).catch(() => []);
-      return NextResponse.json({ success: true, results });
+      return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'animexin') {
       const results = await getAnimeXinSearch(query).catch(() => []);
-      return NextResponse.json({ success: true, results });
+      return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'donghuastream') {
       const results = await getDonghuastreamSearch(query).catch(() => []);
-      return NextResponse.json({ success: true, results });
+      return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'manga') {
       const results = await searchManga(query).catch(() => []);
-      return NextResponse.json({ success: true, results: results.map(r => ({ ...r, type: 'manga' as const })) });
+      const mapped = results.map(r => ({ ...r, type: 'manga' as const }));
+      return NextResponse.json({ success: true, results: filterSafeList(mapped) });
     }
     if (source === 'shortdrama') {
       const results = await searchShortDrama(query).catch(() => []);
-      return NextResponse.json({ success: true, results: results.map(r => ({ ...r, type: 'shortdrama' as const })) });
+      const mapped = results.map(r => ({ ...r, type: 'shortdrama' as const }));
+      return NextResponse.json({ success: true, results: filterSafeList(mapped) });
     }
 
     // Fetch from all concurrently
@@ -110,8 +113,9 @@ export async function GET(req: NextRequest) {
     }
 
     const combined = Array.from(uniqueMap.values());
+    const safeCombined = filterSafeList(combined);
 
-    return NextResponse.json({ success: true, results: combined });
+    return NextResponse.json({ success: true, results: safeCombined });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });

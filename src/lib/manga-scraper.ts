@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { isContentSafe, isSafeQuery, filterSafeList, isNsfwText } from '@/lib/content-filter';
 
 const KOMIKU_BASE = 'https://komiku.org';
 const KOMIKINDO_BASE = 'https://komikindo.org';
@@ -138,9 +139,10 @@ export async function getLatestManga(page: number = 1): Promise<MangaCard[]> {
       });
     });
 
-    if (items.length > 0) {
-      setCache(cacheKey, items);
-      return items;
+    const safeItems = filterSafeList(items);
+    if (safeItems.length > 0) {
+      setCache(cacheKey, safeItems);
+      return safeItems;
     }
   } catch (err) {
     console.warn('[MangaScraper] Komiku fetch failed, trying Komikindo fallback:', err);
@@ -157,7 +159,7 @@ export async function getLatestManga(page: number = 1): Promise<MangaCard[]> {
 
         $('.animepost').each((_, el) => {
           const link = $(el).find('a').attr('href') || '';
-          if (!link || link.includes('/konten/ecchi')) return;
+          if (!link || link.includes('/konten/ecchi') || link.includes('/konten/hentai')) return;
 
           const rawTitle = $(el).find('.tt h3 a, a[rel="bookmark"], .tt h4, h4').first().text().trim();
           const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
@@ -165,6 +167,8 @@ export async function getLatestManga(page: number = 1): Promise<MangaCard[]> {
 
           const img = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || '';
           const slug = link.replace(/.*\/komik\//, '').replace(/\/$/, '');
+
+          if (!isContentSafe({ title, slug })) return;
 
           const typeFlagClass = $(el).find('.typeflag').attr('class') || '';
           let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
@@ -194,9 +198,10 @@ export async function getLatestManga(page: number = 1): Promise<MangaCard[]> {
       } catch {}
     }
 
-    if (items.length > 0) {
-      setCache(cacheKey, items);
-      return items;
+    const safeItems = filterSafeList(items);
+    if (safeItems.length > 0) {
+      setCache(cacheKey, safeItems);
+      return safeItems;
     }
   } catch (err) {
     console.error('[MangaScraper] Error fetching latest manga:', err);
@@ -248,7 +253,7 @@ export async function getPopularManga(): Promise<MangaCard[]> {
  */
 export async function searchManga(query: string): Promise<MangaCard[]> {
   const cleanQ = query.trim().toLowerCase();
-  if (!cleanQ) return [];
+  if (!cleanQ || !isSafeQuery(cleanQ)) return [];
 
   const cacheKey = `manga:search:${cleanQ}`;
   const cached = getCached<MangaCard[]>(cacheKey);
@@ -261,7 +266,7 @@ export async function searchManga(query: string): Promise<MangaCard[]> {
   const latest = await getLatestManga(1);
   for (const item of latest) {
     if (item.title.toLowerCase().includes(cleanQ) || item.slug.toLowerCase().includes(cleanQ)) {
-      if (!seenSlugs.has(item.slug)) {
+      if (!seenSlugs.has(item.slug) && isContentSafe(item)) {
         seenSlugs.add(item.slug);
         results.push(item);
       }
@@ -278,14 +283,14 @@ export async function searchManga(query: string): Promise<MangaCard[]> {
 
       $('.animepost').each((_, el) => {
         const link = $(el).find('a').attr('href') || '';
-        if (!link || link.includes('/konten/ecchi')) return;
+        if (!link || link.includes('/konten/ecchi') || link.includes('/konten/hentai')) return;
 
         const rawTitle = $(el).find('.tt h3 a, a[rel="bookmark"], .tt h4, h4').first().text().trim();
         const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
         if (!title) return;
 
         const slug = link.replace(/.*\/komik\//, '').replace(/\/$/, '');
-        if (seenSlugs.has(slug)) return;
+        if (seenSlugs.has(slug) || !isContentSafe({ title, slug })) return;
         seenSlugs.add(slug);
 
         const img = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || '';
@@ -317,17 +322,20 @@ export async function searchManga(query: string): Promise<MangaCard[]> {
     } catch {}
   }
 
-  setCache(cacheKey, results);
-  return results;
+  const safeResults = filterSafeList(results);
+  setCache(cacheKey, safeResults);
+  return safeResults;
 }
 
 /**
  * Fetch single manga detail and full chapter list
  */
 export async function getMangaDetail(slug: string): Promise<MangaDetail | null> {
+  if (!slug || !isSafeQuery(slug)) return null;
+
   const cacheKey = `manga:detail:${slug}`;
   const cached = getCached<MangaDetail>(cacheKey);
-  if (cached) return cached;
+  if (cached && isContentSafe(cached)) return cached;
 
   // 1. Try Komiku
   try {
@@ -385,7 +393,7 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
           chapters,
         };
 
-        if (chapters.length > 0) {
+        if (chapters.length > 0 && isContentSafe(detail)) {
           setCache(cacheKey, detail);
           return detail;
         }
@@ -465,6 +473,11 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
           chapters,
         };
 
+        if (!isContentSafe(detail)) {
+          console.warn(`[MangaScraper] Blocked NSFW manga detail from Komikindo: ${slug}`);
+          return null;
+        }
+
         setCache(cacheKey, detail);
         return detail;
       } catch {}
@@ -480,6 +493,8 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
  * Fetch chapter images and navigation
  */
 export async function getChapterData(chapterSlug: string): Promise<ChapterData | null> {
+  if (!chapterSlug || isNsfwText(chapterSlug)) return null;
+
   const cacheKey = `manga:chapter:${chapterSlug}`;
   const cached = getCached<ChapterData>(cacheKey);
   if (cached) return cached;

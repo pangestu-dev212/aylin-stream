@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getShortDramaDetail } from '@/lib/shortdrama-scraper';
+import { isContentSafe } from '@/lib/content-filter';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,7 @@ export async function GET(
     const bookId = id.split('-')[0];
 
     const detail = await getShortDramaDetail(bookId);
-    if (!detail) {
+    if (!detail || !isContentSafe(detail)) {
       return NextResponse.json({ success: false, error: 'Short drama not found' }, { status: 404 });
     }
 

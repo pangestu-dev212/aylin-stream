@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { getChapterData } from '@/lib/manga-scraper';
 import MangaReaderClient from './MangaReaderClient';
 
+export const dynamic = 'force-dynamic';
+
 interface Props {
   params: Promise<{ chapterSlug: string }>;
 }
