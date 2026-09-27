@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { getShortDramaDetail } from '@/lib/shortdrama-scraper';
 import ShortDramaPlayerClient from './ShortDramaPlayerClient';
 
+export const dynamic = 'force-dynamic';
+
 interface Props {
   params: Promise<{ id: string }>;
 }

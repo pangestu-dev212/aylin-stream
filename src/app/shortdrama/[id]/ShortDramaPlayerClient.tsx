@@ -32,12 +32,14 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
 
   const episodes = detail.episodes || [];
   const currentEp = episodes[currentEpIndex] || null;
-  const [currentStreamSrc, setCurrentStreamSrc] = useState(currentEp?.streamUrl || '');
+  const [currentStreamSrc, setCurrentStreamSrc] = useState(
+    currentEp?.streamUrl || currentEp?.proxyUrl || currentEp?.rawUrl || ''
+  );
 
   // Sync streamUrl when episode changes
   useEffect(() => {
     if (currentEp) {
-      setCurrentStreamSrc(currentEp.streamUrl);
+      setCurrentStreamSrc(currentEp.streamUrl || currentEp.proxyUrl || currentEp.rawUrl || '');
       setVideoError(false);
       setIsBuffering(true);
     }
@@ -63,6 +65,7 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
                 setIsPlaying(true);
                 setIsBuffering(false);
               }).catch(() => {
+                // Both unmuted and muted blocked (awaiting user tap)
                 setIsPlaying(false);
                 setIsBuffering(false);
               });
@@ -79,11 +82,19 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
     }
   };
 
-  // Error recovery: switch to raw CDN URL if proxy fails
+  // Dual-layer error recovery: direct CDN <-> video-proxy fallback
   const handleVideoError = () => {
-    if (currentEp?.rawUrl && currentStreamSrc !== currentEp.rawUrl) {
-      console.warn('[ShortDrama] Proxy stream failed, falling back to direct rawUrl...');
+    console.warn('[ShortDrama] Video stream failed on:', currentStreamSrc);
+    if (currentEp?.proxyUrl && currentStreamSrc !== currentEp.proxyUrl) {
+      console.log('[ShortDrama] Switching to proxy stream fallback...');
+      setCurrentStreamSrc(currentEp.proxyUrl);
+      setVideoError(false);
+      setIsBuffering(true);
+    } else if (currentEp?.rawUrl && currentStreamSrc !== currentEp.rawUrl) {
+      console.log('[ShortDrama] Switching to direct rawUrl stream fallback...');
       setCurrentStreamSrc(currentEp.rawUrl);
+      setVideoError(false);
+      setIsBuffering(true);
     } else {
       setVideoError(true);
       setIsPlaying(false);
@@ -255,11 +266,16 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
                   key={currentStreamSrc}
                   src={currentStreamSrc}
                   playsInline
-                  onEnded={handleEnded}
-                  onTimeUpdate={handleTimeUpdate}
+                  autoPlay
+                  preload="auto"
+                  onLoadedMetadata={() => setIsBuffering(false)}
+                  onCanPlay={() => setIsBuffering(false)}
+                  onCanPlayThrough={() => setIsBuffering(false)}
                   onWaiting={() => setIsBuffering(true)}
                   onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
                   onPause={() => setIsPlaying(false)}
+                  onEnded={handleEnded}
+                  onTimeUpdate={handleTimeUpdate}
                   onError={handleVideoError}
                   onClick={togglePlay}
                   poster={currentEp?.cover || detail.cover}
@@ -268,8 +284,8 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
 
                 {/* Buffering Indicator */}
                 {isBuffering && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none z-10">
-                    <div className="w-10 h-10 border-3 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none z-10">
+                    <div className="w-12 h-12 border-3 border-rose-500 border-t-transparent rounded-full animate-spin shadow-lg" />
                   </div>
                 )}
               </>
@@ -282,23 +298,30 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
                 <button
                   onClick={() => {
                     setVideoError(false);
-                    if (currentEp?.rawUrl) setCurrentStreamSrc(currentEp.rawUrl);
-                    else if (currentEp?.streamUrl) setCurrentStreamSrc(currentEp.streamUrl);
+                    setIsBuffering(true);
+                    if (currentStreamSrc === currentEp?.proxyUrl && currentEp?.rawUrl) {
+                      setCurrentStreamSrc(currentEp.rawUrl);
+                    } else if (currentEp?.proxyUrl) {
+                      setCurrentStreamSrc(currentEp.proxyUrl);
+                    } else if (currentEp?.streamUrl) {
+                      setCurrentStreamSrc(currentEp.streamUrl);
+                    }
                   }}
-                  className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-lg"
+                  className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-lg shadow-rose-600/30"
                 >
                   <RotateCcw size={13} /> Coba Putar Ulang
                 </button>
               </div>
             )}
 
-            {/* Tap to Play / Pause Big Center Icon */}
-            {!isPlaying && !isBuffering && !videoError && (
+            {/* Tap to Play / Pause Big Center Icon - Always visible when paused for user gesture */}
+            {!isPlaying && !videoError && (
               <button
                 onClick={togglePlay}
-                className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer z-10"
+                className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer z-20 group/playbtn"
+                aria-label="Putar Drama"
               >
-                <div className="w-16 h-16 rounded-full bg-rose-500/90 text-white flex items-center justify-center shadow-2xl glow-rose scale-105 transition-transform">
+                <div className="w-16 h-16 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-2xl glow-rose scale-100 group-hover/playbtn:scale-110 transition-transform">
                   <Play size={28} fill="white" className="ml-1" />
                 </div>
               </button>

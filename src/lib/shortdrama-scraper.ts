@@ -1,5 +1,11 @@
 const SANSEKAI_BASE = 'https://api.sansekai.my.id/api';
 
+const DEFAULT_HEADERS = {
+  'Accept': 'application/json',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Referer': 'https://api.sansekai.my.id/',
+};
+
 export interface ShortDramaCard {
   bookId: string;
   title: string;
@@ -17,6 +23,7 @@ export interface ShortDramaEpisode {
   name: string;
   streamUrl: string;
   rawUrl?: string;
+  proxyUrl?: string;
   cover: string;
   isCharge: boolean;
 }
@@ -66,7 +73,7 @@ export async function getShortDramaPopular(): Promise<ShortDramaCard[]> {
 
   try {
     const res = await fetch(`${SANSEKAI_BASE}/dramabox/dubindo?classify=terpopuler`, {
-      headers: { 'Accept': 'application/json' },
+      headers: DEFAULT_HEADERS,
       next: { revalidate: 300 },
       signal: AbortSignal.timeout(10000),
     });
@@ -90,7 +97,9 @@ export async function getShortDramaPopular(): Promise<ShortDramaCard[]> {
       };
     });
 
-    setCache(cacheKey, cards);
+    if (cards.length > 0) {
+      setCache(cacheKey, cards);
+    }
     return cards;
   } catch (err) {
     console.error('Error fetching popular short dramas:', err);
@@ -108,7 +117,7 @@ export async function getShortDramaLatest(): Promise<ShortDramaCard[]> {
 
   try {
     const res = await fetch(`${SANSEKAI_BASE}/dramabox/dubindo?classify=terbaru`, {
-      headers: { 'Accept': 'application/json' },
+      headers: DEFAULT_HEADERS,
       next: { revalidate: 300 },
       signal: AbortSignal.timeout(10000),
     });
@@ -132,7 +141,9 @@ export async function getShortDramaLatest(): Promise<ShortDramaCard[]> {
       };
     });
 
-    setCache(cacheKey, cards);
+    if (cards.length > 0) {
+      setCache(cacheKey, cards);
+    }
     return cards;
   } catch (err) {
     console.error('Error fetching latest short dramas:', err);
@@ -153,7 +164,7 @@ export async function searchShortDrama(query: string): Promise<ShortDramaCard[]>
 
   try {
     const res = await fetch(`${SANSEKAI_BASE}/dramabox/search?query=${encodeURIComponent(cleanQ)}`, {
-      headers: { 'Accept': 'application/json' },
+      headers: DEFAULT_HEADERS,
       signal: AbortSignal.timeout(10000),
     });
 
@@ -176,7 +187,9 @@ export async function searchShortDrama(query: string): Promise<ShortDramaCard[]>
       };
     });
 
-    setCache(cacheKey, cards);
+    if (cards.length > 0) {
+      setCache(cacheKey, cards);
+    }
     return cards;
   } catch (err) {
     console.error('Error searching short dramas:', err);
@@ -185,26 +198,45 @@ export async function searchShortDrama(query: string): Promise<ShortDramaCard[]>
 }
 
 /**
+ * Helper to fetch JSON with retries
+ */
+async function fetchWithRetry(url: string, retries = 2, timeoutMs = 12000): Promise<any | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: DEFAULT_HEADERS,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {
+      // Ignore and retry
+    }
+    if (attempt < retries) {
+      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+  return null;
+}
+
+/**
  * Get Short Drama detail and all playable episodes
  */
 export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDetail | null> {
-  const cacheKey = `shortdrama:detail:${bookId}`;
+  const cleanId = bookId.trim();
+  if (!cleanId) return null;
+
+  const cacheKey = `shortdrama:detail:${cleanId}`;
   const cached = getCached<ShortDramaDetail>(cacheKey);
-  if (cached) return cached;
+  if (cached && cached.episodes?.length > 0) return cached;
 
   try {
-    // 1. Fetch metadata and episodes concurrently
+    // 1. Fetch metadata and episodes concurrently with automatic retries
     const [detailRes, episodesRes] = await Promise.all([
-      fetch(`${SANSEKAI_BASE}/dramabox/detail?bookId=${encodeURIComponent(bookId)}&lang=id`, {
-        headers: { 'Accept': 'application/json' },
-        next: { revalidate: 600 },
-        signal: AbortSignal.timeout(10000),
-      }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${SANSEKAI_BASE}/dramabox/get-allepisode?bookId=${encodeURIComponent(bookId)}`, {
-        headers: { 'Accept': 'application/json' },
-        next: { revalidate: 600 },
-        signal: AbortSignal.timeout(12000),
-      }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetchWithRetry(`${SANSEKAI_BASE}/dramabox/detail?bookId=${encodeURIComponent(cleanId)}&lang=id`),
+      fetchWithRetry(`${SANSEKAI_BASE}/dramabox/get-allepisode?bookId=${encodeURIComponent(cleanId)}`),
     ]);
 
     const info = detailRes?.data || detailRes || {};
@@ -227,37 +259,57 @@ export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDet
       if (Array.isArray(ep.cdnList) && ep.cdnList.length > 0) {
         for (const cdn of ep.cdnList) {
           if (Array.isArray(cdn.videoPathList)) {
-            // Prefer 720p or 1080p, fallback to first
+            // Prioritize standard 720p or 1080p, then 540p / 360p, fallback to first
             const pathObj = cdn.videoPathList.find((p: any) => p.quality === 720) ||
                             cdn.videoPathList.find((p: any) => p.quality === 1080) ||
+                            cdn.videoPathList.find((p: any) => p.quality === 540) ||
+                            cdn.videoPathList.find((p: any) => p.quality === 360) ||
                             cdn.videoPathList[0];
             if (pathObj?.videoPath) {
               rawVideoUrl = pathObj.videoPath;
               break;
             }
           }
+          if (cdn.videoPath) {
+            rawVideoUrl = cdn.videoPath;
+            break;
+          }
         }
       }
 
-      // Assign streamUrl through video-proxy to bypass 429 rate limits & CORS
-      const streamUrl = rawVideoUrl
+      if (!rawVideoUrl) {
+        rawVideoUrl = ep.videoUrl || ep.playUrl || ep.videoPath || '';
+      }
+
+      // Proxy URL for ISP-blocked fallbacks
+      const proxyUrl = rawVideoUrl
         ? `/api/video-proxy?url=${encodeURIComponent(rawVideoUrl)}`
         : '';
+
+      // Direct CDN stream is fastest and has no serverless timeout; proxyUrl is fallback
+      const streamUrl = rawVideoUrl || proxyUrl;
 
       return {
         episodeNo,
         name,
         streamUrl,
         rawUrl: rawVideoUrl,
+        proxyUrl,
         cover: epCover,
         isCharge,
       };
     });
 
+    // Guard: Only construct detail if episodes exist
+    if (episodes.length === 0) {
+      console.warn(`[ShortDrama] No playable episodes returned for drama: ${cleanId}`);
+      return null;
+    }
+
     const detail: ShortDramaDetail = {
-      bookId,
+      bookId: cleanId,
       title,
-      slug: `${bookId}-${slugify(title)}`,
+      slug: `${cleanId}-${slugify(title)}`,
       cover,
       chapterCount: episodes.length || info.chapterCount || 0,
       synopsis,
@@ -270,7 +322,7 @@ export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDet
     setCache(cacheKey, detail);
     return detail;
   } catch (err) {
-    console.error(`Error fetching detail for short drama ${bookId}:`, err);
+    console.error(`Error fetching detail for short drama ${cleanId}:`, err);
     return null;
   }
 }
