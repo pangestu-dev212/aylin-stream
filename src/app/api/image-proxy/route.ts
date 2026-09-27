@@ -76,7 +76,28 @@ export async function GET(req: NextRequest) {
       return new NextResponse('Missing url parameter', { status: 400 });
     }
 
-    // Attempt to download the image at server-side using DoH
+    // 1. Try fast direct fetch first (works for 90%+ unblocked CDNs)
+    try {
+      const directRes = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Referer': new URL(imageUrl).origin + '/',
+        },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (directRes.ok) {
+        const arrayBuf = await directRes.arrayBuffer();
+        const contentType = directRes.headers.get('content-type') || 'image/jpeg';
+        return new NextResponse(new Uint8Array(arrayBuf), {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400',
+          },
+        });
+      }
+    } catch {}
+
+    // 2. Fallback to server-side DoH resolution
     const { buffer, contentType } = await fetchImageWithDoh(imageUrl);
 
     return new NextResponse(new Uint8Array(buffer), {

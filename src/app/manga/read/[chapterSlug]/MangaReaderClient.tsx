@@ -19,6 +19,7 @@ export default function MangaReaderClient({ chapter }: Props) {
   const [progress, setProgress] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [failedImages, setFailedImages] = useState<Record<number, boolean>>({});
+  const [proxiedImages, setProxiedImages] = useState<Record<number, boolean>>({});
 
   // Scroll listener for reading progress and scroll-to-top button
   useEffect(() => {
@@ -53,12 +54,22 @@ export default function MangaReaderClient({ chapter }: Props) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleImageError = (idx: number) => {
+    if (!proxiedImages[idx]) {
+      // Automatically retry via our server-side image proxy
+      setProxiedImages(prev => ({ ...prev, [idx]: true }));
+    } else {
+      setFailedImages(prev => ({ ...prev, [idx]: true }));
+    }
+  };
+
   const retryImage = (idx: number) => {
     setFailedImages(prev => {
       const next = { ...prev };
       delete next[idx];
       return next;
     });
+    setProxiedImages(prev => ({ ...prev, [idx]: true }));
   };
 
   const containerWidthClass = {
@@ -188,13 +199,11 @@ export default function MangaReaderClient({ chapter }: Props) {
                 </div>
               ) : (
                 <img
-                  src={imgUrl}
+                  src={proxiedImages[idx] ? `/api/image-proxy?url=${encodeURIComponent(imgUrl)}` : imgUrl}
                   alt={`Halaman ${idx + 1}`}
                   loading={idx < 3 ? 'eager' : 'lazy'}
                   decoding="async"
-                  onError={() => {
-                    setFailedImages(prev => ({ ...prev, [idx]: true }));
-                  }}
+                  onError={() => handleImageError(idx)}
                   className="w-full h-auto object-contain block mx-auto transition-opacity duration-300"
                 />
               )}

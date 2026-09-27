@@ -873,7 +873,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
       const json = await res.json();
 
       if (json.success && json.src) {
-        setPlayerSrc(json.src);
+        setPlayerSrc(wrapWithProxy(json.src));
       } else {
         setError('Gagal menghubungkan ke server video. Silakan pilih server/kualitas alternatif.');
       }
@@ -1445,56 +1445,51 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                 </div>
               ) : playerSrc ? (
                 <>
-                  {((activeMirror?.payload?.directSrc && (
+                  {(() => {
+                    const raw = (activeMirror?.payload?.directSrc && (
                       activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
                       activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
                       activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/') ||
                       activeMirror.payload.directSrc.includes('/api/video-proxy')
-                    )) ||
-                    playerSrc.endsWith('.mp4') || playerSrc.includes('.mp4?') ||
-                    playerSrc.endsWith('.mkv') || playerSrc.includes('.mkv?') ||
-                    playerSrc.includes('pixeldrain.com/api/file/') ||
-                    playerSrc.includes('/api/video-proxy')) ? (
-                    <video
-                      key={playerSrc}
-                      src={(() => {
-                        const raw = (activeMirror?.payload?.directSrc && (
-                          activeMirror.payload.directSrc.endsWith('.mp4') || activeMirror.payload.directSrc.includes('.mp4?') ||
-                          activeMirror.payload.directSrc.endsWith('.mkv') || activeMirror.payload.directSrc.includes('.mkv?') ||
-                          activeMirror.payload.directSrc.includes('pixeldrain.com/api/file/') ||
-                          activeMirror.payload.directSrc.includes('/api/video-proxy')
-                        )) ? activeMirror.payload.directSrc : playerSrc;
-                        if (raw.includes('pixeldrain.com') && !raw.includes('/api/video-proxy')) {
-                          return `/api/video-proxy?url=${encodeURIComponent(raw)}`;
-                        }
-                        return raw;
-                      })()}
-                      controls
-                      autoPlay
-                      playsInline
-                      onError={() => {
-                        triggerAutoFallback();
-                      }}
+                    )) ? activeMirror.payload.directSrc : playerSrc;
+                    const effectiveVideoSrc = (raw && raw.includes('pixeldrain.com') && !raw.includes('/api/video-proxy'))
+                      ? `/api/video-proxy?url=${encodeURIComponent(raw)}`
+                      : raw;
+                    const isDirectVideo = (
+                      effectiveVideoSrc.endsWith('.mp4') || effectiveVideoSrc.includes('.mp4?') ||
+                      effectiveVideoSrc.endsWith('.mkv') || effectiveVideoSrc.includes('.mkv?') ||
+                      effectiveVideoSrc.includes('/api/video-proxy')
+                    );
 
-
-                      onEnded={() => {
-                        if (hasNextEpisode()) {
-                          showHUD('Episode Selesai, memutar episode berikutnya... ⏭️');
-                          playNextEpisode();
-                        }
-                      }}
-                      className="w-full h-full object-contain bg-black"
-                    />
-                  ) : (
-                    <iframe
-                      src={playerSrc}
-                      className="w-full h-full border-0"
-                      allowFullScreen
-                      scrolling="no"
-                      referrerPolicy="no-referrer"
-                      sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-top-navigation"
-                    />
-                  )}
+                    return isDirectVideo ? (
+                      <video
+                        key={effectiveVideoSrc}
+                        src={effectiveVideoSrc}
+                        controls
+                        autoPlay
+                        playsInline
+                        onError={() => {
+                          triggerAutoFallback();
+                        }}
+                        onEnded={() => {
+                          if (hasNextEpisode()) {
+                            showHUD('Episode Selesai, memutar episode berikutnya... ⏭️');
+                            playNextEpisode();
+                          }
+                        }}
+                        className="w-full h-full object-contain bg-black"
+                      />
+                    ) : (
+                      <iframe
+                        src={playerSrc}
+                        className="w-full h-full border-0"
+                        allowFullScreen
+                        scrolling="no"
+                        referrerPolicy="no-referrer"
+                        sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-top-navigation"
+                      />
+                    );
+                  })()}
 
                   {/* Floating Skip Intro Button */}
                   {elapsedTime < 90 && !episodeLoading && !playerLoading && !error && (
