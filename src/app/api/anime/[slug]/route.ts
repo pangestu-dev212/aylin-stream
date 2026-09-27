@@ -14,18 +14,34 @@ function extractTitleFromExternalSlug(slug: string): string {
  * Smart anime search with progressive keyword shortening + relevance filtering.
  * Tries 3 words → 2 words → 1 word until relevant results are found.
  */
-async function smartAnimeSearch(cleanTitle: string): Promise<any | null> {
+async function smartAnimeSearch(cleanTitle: string, originalSlug = ''): Promise<any | null> {
   const words = cleanTitle.split(' ');
   const firstWord = words[0].toLowerCase();
 
+  // Extract season/part number from original slug
+  const seasonMatch = originalSlug.match(/season[- ](\d+)|part[- ](\d+)|s(\d+)/i);
+  const seasonNum = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3]) : null;
+  const romanMap: Record<number, string> = { 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v' };
+  const romanNum = seasonNum ? romanMap[seasonNum] || null : null;
+
   const isRelevant = (title: string) => title.toLowerCase().includes(firstWord);
 
-  const pickBest = (results: any[]) => {
+  const score = (title: string): number => {
+    const t = title.toLowerCase();
+    let s = 0;
+    if (t === cleanTitle.toLowerCase()) return 1000;
+    if (romanNum && t.includes(romanNum)) s += 50;
+    if (seasonNum && t.includes(`season ${seasonNum}`)) s += 50;
+    if (seasonNum && t.includes(`s${seasonNum}`)) s += 30;
+    if (!t.includes('special') && !t.includes('ova') && !t.includes('movie')) s += 20;
+    if (t.startsWith(words.slice(0, 2).join(' ').toLowerCase())) s += 10;
+    return s;
+  };
+
+  const pickBest = (results: any[]): any | null => {
     const relevant = results.filter(s => isRelevant(s.title));
     if (relevant.length === 0) return null;
-    return relevant.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase())
-      || relevant.find(s => s.title.toLowerCase().startsWith(words.slice(0, 2).join(' ').toLowerCase()))
-      || relevant[0];
+    return relevant.sort((a, b) => score(b.title) - score(a.title))[0];
   };
 
   const queries = [
@@ -58,6 +74,7 @@ async function smartAnimeSearch(cleanTitle: string): Promise<any | null> {
 }
 
 
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
@@ -74,7 +91,7 @@ export async function GET(
     const isExternalSlug = slug.startsWith('anilist-') || slug.startsWith('jikan-');
     if (isExternalSlug) {
       const searchTitle = extractTitleFromExternalSlug(slug);
-      data = await smartAnimeSearch(searchTitle);
+      data = await smartAnimeSearch(searchTitle, slug);
 
       if (!data) {
         return NextResponse.json(

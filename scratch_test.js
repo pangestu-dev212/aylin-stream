@@ -1,52 +1,71 @@
-// Replicate the fix from page.tsx
-async function searchAnimeFallback(slug) {
-  const cleanTitle = slug
+const { getSamehadakuSearch, getSamehadakuDetail } = require('./src/lib/stream-scraper.ts');
+
+async function testScoring(originalSlug) {
+  const cleanTitle = originalSlug
     .replace(/^(anilist|jikan)-\d+-/, '')
     .replace(/-sub-indo$/i, '')
-    .replace(/-episode-\d+.*$/i, '')
     .replace(/-[a-z0-9]{7}$/i, '')
     .replace(/^1piece/i, 'one piece')
     .replace(/-/g, ' ')
     .trim();
 
-  if (!cleanTitle) return null;
-
   const words = cleanTitle.split(' ');
-  const shortQuery = words.slice(0, 3).join(' ');
   const firstWord = words[0].toLowerCase();
+
+  const seasonMatch = originalSlug.match(/season[- ](\d+)|part[- ](\d+)|s(\d+)/i);
+  const seasonNum = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3]) : null;
+  const romanMap = { 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v' };
+  const romanNum = seasonNum ? romanMap[seasonNum] || null : null;
+
+  console.log(`slug: ${originalSlug}`);
+  console.log(`clean: "${cleanTitle}"`);
+  console.log(`seasonNum: ${seasonNum}, romanNum: ${romanNum}`);
+
   const isRelevant = (title) => title.toLowerCase().includes(firstWord);
+  const score = (title) => {
+    const t = title.toLowerCase();
+    let s = 0;
+    if (t === cleanTitle.toLowerCase()) return 1000;
+    if (romanNum && t.includes(romanNum)) s += 50;
+    if (seasonNum && t.includes(`season ${seasonNum}`)) s += 50;
+    if (seasonNum && t.includes(`s${seasonNum}`)) s += 30;
+    if (!t.includes('special') && !t.includes('ova') && !t.includes('movie')) s += 20;
+    if (t.startsWith(words.slice(0, 2).join(' ').toLowerCase())) s += 10;
+    return s;
+  };
 
-  const { getSamehadakuSearch, getSamehadakuDetail, getOtakudesuSearch, getOtakudesuDetail } = require('./src/lib/stream-scraper.ts');
+  const queries = [
+    words.slice(0, 3).join(' '),
+    words.slice(0, 2).join(' '),
+    words[0]
+  ].filter((q, i, arr) => arr.indexOf(q) === i);
 
-  const sameResults = await getSamehadakuSearch(shortQuery).catch(() => []);
-  const sameRelevant = sameResults.filter(s => isRelevant(s.title));
-  
-  console.log(`Query: "${shortQuery}" -> ${sameResults.length} results, ${sameRelevant.length} relevant`);
-  sameRelevant.forEach(r => console.log(`  - "${r.title}" (${r.slug})`));
+  for (const query of queries) {
+    const results = await getSamehadakuSearch(query).catch(() => []);
+    const relevant = results.filter(r => isRelevant(r.title));
+    if (relevant.length === 0) { console.log(`[${query}] no relevant`); continue; }
 
-  if (sameRelevant.length > 0) {
-    const best = sameRelevant.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase())
-      || sameRelevant.find(s => s.title.toLowerCase().startsWith(words.slice(0, 2).join(' ').toLowerCase()))
-      || sameRelevant[0];
-    console.log(`Best match: "${best.title}"`);
+    const scored = relevant.map(r => ({ ...r, score: score(r.title) }))
+      .sort((a, b) => b.score - a.score);
+    
+    console.log(`[${query}] relevant results (scored):`);
+    scored.slice(0, 5).forEach(r => console.log(`  score=${r.score} "${r.title}"`));
+    
+    const best = scored[0];
     const d = await getSamehadakuDetail(best.slug).catch(() => null);
-    if (d && d.episodes && d.episodes.length > 0) {
-      console.log(`✓ Found! ${d.episodes.length} episodes`);
-      return { data: d, resolvedSource: 'samehadaku' };
+    if (d && d.episodes?.length > 0) {
+      console.log(`✓ PICKED: "${d.title}" (${d.episodes.length} eps)`);
+      return;
     }
+    break;
   }
-  console.log('✗ Not found');
-  return null;
 }
 
 async function run() {
-  console.log('=== Mushoku Tensei ===');
-  await searchAnimeFallback('anilist-178789-mushoku-tensei-jobless-reincarnation-season-3');
+  console.log('=== Mushoku Tensei Season 3 ===');
+  await testScoring('anilist-178789-mushoku-tensei-jobless-reincarnation-season-3');
 
-  console.log('\n=== Spy x Family ===');
-  await searchAnimeFallback('anilist-142838-spy-x-family-season-2');
-
-  console.log('\n=== Demon Slayer ===');
-  await searchAnimeFallback('anilist-101922-kimetsu-no-yaiba-demon-slayer');
+  console.log('\n=== Kaguya-sama Season 3 ===');
+  await testScoring('anilist-124080-kaguya-sama-wa-kokurasetai-ultra-romantic-season-3');
 }
 run();

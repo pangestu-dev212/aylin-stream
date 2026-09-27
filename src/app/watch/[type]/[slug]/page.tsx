@@ -40,16 +40,38 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
   const words = cleanTitle.split(' ');
   const firstWord = words[0].toLowerCase();
 
+  // Extract season/part number from original slug (e.g. "season-3" → 3, "part-2" → 2)
+  const seasonMatch = slug.match(/season[- ](\d+)|part[- ](\d+)|s(\d+)/i);
+  const seasonNum = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3]) : null;
+  // Roman numerals map: season 2 → ii, season 3 → iii, etc.
+  const romanMap: Record<number, string> = { 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v' };
+  const romanNum = seasonNum ? romanMap[seasonNum] || null : null;
+
   // Helper: does result title contain at least first keyword?
   const isRelevant = (title: string) => title.toLowerCase().includes(firstWord);
 
-  // Pick best match from relevant results
-  const pickBest = (results: any[]) => {
+  // Score a candidate: higher = better match
+  const score = (title: string): number => {
+    const t = title.toLowerCase();
+    let s = 0;
+    // Exact match wins
+    if (t === cleanTitle.toLowerCase()) return 1000;
+    // Season number match (roman or digit)
+    if (romanNum && t.includes(romanNum)) s += 50;
+    if (seasonNum && t.includes(`season ${seasonNum}`)) s += 50;
+    if (seasonNum && t.includes(`s${seasonNum}`)) s += 30;
+    // Not a special/ova (avoid these for season searches)
+    if (!t.includes('special') && !t.includes('ova') && !t.includes('movie')) s += 20;
+    // Starts with first 2 words
+    if (t.startsWith(words.slice(0, 2).join(' ').toLowerCase())) s += 10;
+    return s;
+  };
+
+  // Pick best match from relevant results by score
+  const pickBest = (results: any[]): any | null => {
     const relevant = results.filter(s => isRelevant(s.title));
     if (relevant.length === 0) return null;
-    return relevant.find(s => s.title.toLowerCase() === cleanTitle.toLowerCase())
-      || relevant.find(s => s.title.toLowerCase().startsWith(words.slice(0, 2).join(' ').toLowerCase()))
-      || relevant[0];
+    return relevant.sort((a, b) => score(b.title) - score(a.title))[0];
   };
 
   // Try progressively shorter queries: 3 words → 2 words → 1 word
@@ -85,6 +107,7 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
 
   return null;
 }
+
 
 
 async function fetchDetail(type: string, slug: string, source?: string) {
