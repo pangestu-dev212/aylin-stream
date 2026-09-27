@@ -1461,6 +1461,10 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                       controls
                       autoPlay
                       playsInline
+                      onError={() => {
+                        triggerAutoFallback();
+                      }}
+
 
                       onEnded={() => {
                         if (hasNextEpisode()) {
@@ -1627,9 +1631,12 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                             : 'bg-white/5 text-slate-400 hover:bg-white/10'
                         }`}
                       >
-                        {m.playerText} ({m.quality})
+                        {m.playerText.toLowerCase().includes(m.quality.toLowerCase()) 
+                          ? m.playerText 
+                          : `${m.playerText} (${m.quality})`}
                       </button>
                     ))}
+
                   </div>
                 )}
               </div>

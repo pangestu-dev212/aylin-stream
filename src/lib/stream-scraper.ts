@@ -1606,31 +1606,64 @@ export async function getSamehadakuEpisode(slug: string) {
     const title = $('.entry-title, h1').first().text().trim();
     const mirrors: any[] = [];
 
-    // 1. Direct Pixeldrain video streams from download sections (Highest priority: zero ads, full speed HTML5 video)
-    $('a[href*="pixeldrain.com"]').each((i, el) => {
-      const href = $(el).attr('href') || '';
-      const idMatch = href.match(/pixeldrain\.com\/u\/([a-zA-Z0-9]+)/);
-      if (idMatch) {
-        const fileId = idMatch[1];
-        const quality = $(el).closest('.download-eps, .dl, li, p').text().match(/\b(360p|480p|720p|1080p)\b/i)?.[0] || 'HD';
-        const streamUrl = `https://pixeldrain.com/api/file/${fileId}`;
-        if (!mirrors.some(m => m.payload.src === streamUrl)) {
-          mirrors.push({
-            quality,
-            playerText: `Pixeldrain (${quality})`,
-            payload: { src: streamUrl, directSrc: streamUrl }
-          });
+    // 1. Direct Pixeldrain MP4 video streams from download sections (Highest priority: genuine video/mp4, zero ads, HTML5 video compatible)
+    const rawMirrors: { quality: string; isMp4: boolean; streamUrl: string }[] = [];
+    $('.download-eps, .dl, [class*="download"]').each((i, el) => {
+      const sectionHeader = $(el).find('b, strong, span').first().text().trim() || $(el).text().split('\n')[0].trim();
+      const isMp4Section = /mp4/i.test(sectionHeader);
+
+      $(el).find('li, p, div').each((j, row) => {
+        const rowText = $(row).text().replace(/\s+/g, ' ').trim();
+        const pixeldrainLink = $(row).find('a[href*="pixeldrain.com"]').attr('href');
+
+        if (pixeldrainLink) {
+          const idMatch = pixeldrainLink.match(/pixeldrain\.com\/u\/([a-zA-Z0-9]+)/);
+          if (idMatch) {
+            const fileId = idMatch[1];
+            let quality = '720p';
+            if (/4k/i.test(rowText)) quality = '4K';
+            else if (/1080p|fullhd/i.test(rowText)) quality = '1080p';
+            else if (/720p|mp4hd/i.test(rowText)) quality = '720p';
+            else if (/480p/i.test(rowText)) quality = '480p';
+            else if (/360p/i.test(rowText)) quality = '360p';
+
+            rawMirrors.push({
+              quality,
+              isMp4: isMp4Section,
+              streamUrl: `https://pixeldrain.com/api/file/${fileId}`
+            });
+          }
         }
-      }
+      });
     });
 
-    // 2. Direct iframe player in page (e.g. putarin.biz, etc.)
+    // Prefer MP4 sections first so HTML5 video in Chrome/Safari works seamlessly
+    const mp4List = rawMirrors.filter(m => m.isMp4);
+    const chosenList = mp4List.length > 0 ? mp4List : rawMirrors;
+
+    // Quality sort: 720p > 1080p > 480p > 360p > 4K
+    const qualityWeight: Record<string, number> = { '720p': 10, '1080p': 9, '480p': 8, '360p': 7, '4K': 6 };
+    chosenList.sort((a, b) => (qualityWeight[b.quality] || 0) - (qualityWeight[a.quality] || 0));
+
+    const seenUrls = new Set<string>();
+    for (const item of chosenList) {
+      if (!seenUrls.has(item.streamUrl)) {
+        seenUrls.add(item.streamUrl);
+        mirrors.push({
+          quality: item.quality,
+          playerText: `Pixeldrain MP4`,
+          payload: { src: item.streamUrl, directSrc: item.streamUrl }
+        });
+      }
+    }
+
+    // 2. Direct iframe player in page (if any)
     const defaultSrc = $('iframe').attr('src') || $('iframe').attr('data-src') || '';
     if (defaultSrc && !defaultSrc.includes('facebook.com')) {
       const normalizedDefault = normalizeUrl(defaultSrc, SAMEHADAKU_BASE);
       mirrors.push({
         quality: 'HD',
-        playerText: 'Default Server',
+        playerText: 'Web Player (Embed)',
         payload: { src: normalizedDefault }
       });
     }
