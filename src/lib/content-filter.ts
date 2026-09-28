@@ -58,7 +58,7 @@ export const FORBIDDEN_KEYWORDS: string[] = [
   'persetubuhan',
   'hubungan seksual',
 
-  // Adult / Erotic drama tropes
+  // Adult / Erotic drama & comic tropes
   'tidur dengan',
   'skandal ranjang',
   'di ranjang',
@@ -68,9 +68,58 @@ export const FORBIDDEN_KEYWORDS: string[] = [
   'one-night stand',
   'kenikmatan semalam',
   'gairah ranjang',
+  'gairah liar',
+  'gairah membara',
   'nafsu birahi',
   'wanita penghibur',
+  'wanita simpanan',
+  'istri simpanan',
   'istri sewaan panas',
+  'istri tetangga',
+  'istri orang',
+  'tante girang',
+  'tante seksi',
+  'pelakor',
+  'hubungan terlarang',
+  'cinta terlarang',
+  'malam pertama',
+  'skandal panas',
+  'sugar daddy',
+  'sugar baby',
+  'bobo bareng',
+  'sange',
+  'sensual',
+
+  // Japanese / Manga adult & suggestive tropes
+  'atm ojisan',
+  'ojisan',
+  'mote-ki',
+  'mote-kiga',
+  'mote ki',
+  'motekiga',
+  'saigo no natsu',
+  'hitozuma',
+  'chikan',
+  'netorare',
+  'ntr',
+  'netori',
+  'enjo kosai',
+  'enjokosai',
+  'yari',
+  'yariman',
+  'yarichin',
+  'oppai',
+  'ahegao',
+  'paizuri',
+  'milf',
+  'bukkake',
+  'gangbang',
+  'creampie',
+  'uncensored',
+  'lewd',
+  'shota',
+  'shotacon',
+  'lolicon',
 ];
 
 // Forbidden tags & genres (exact or partial match)
@@ -97,6 +146,10 @@ export const FORBIDDEN_GENRES_AND_TAGS: string[] = [
   'seksual',
   'sexual',
   'perselingkuhan', // often used for erotic infidelity short dramas
+  'sensual',
+  'hitozuma',
+  'netorare',
+  'ntr',
 ];
 
 /**
