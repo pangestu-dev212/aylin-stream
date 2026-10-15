@@ -15,6 +15,7 @@ interface Props {
 
 export default function ShortDramaCatalogClient({ initialPopular, initialLatest }: Props) {
   const [activeTab, setActiveTab] = useState<'popular' | 'latest'>('popular');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'DRACHIN' | 'DUBINDO'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('ALL');
 
@@ -34,6 +35,19 @@ export default function ShortDramaCatalogClient({ initialPopular, initialLatest 
   // Filter list
   const filteredList = useMemo(() => {
     let list = [...sourceList];
+    
+    // Category filter: Drama China vs Dub Indo
+    if (categoryFilter === 'DRACHIN') {
+      list = list.filter(item => 
+        (item.tags || []).some(t => t.toLowerCase().includes('china')) ||
+        item.title.toLowerCase().includes('china') ||
+        item.title.toLowerCase().includes('sub indo') ||
+        !item.isDubIndo
+      );
+    } else if (categoryFilter === 'DUBINDO') {
+      list = list.filter(item => item.isDubIndo);
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter(item => 
@@ -46,7 +60,7 @@ export default function ShortDramaCatalogClient({ initialPopular, initialLatest 
       list = list.filter(item => (item.tags || []).includes(selectedTag));
     }
     return list;
-  }, [sourceList, searchQuery, selectedTag]);
+  }, [sourceList, categoryFilter, searchQuery, selectedTag]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-rose-500/30 selection:text-rose-200">
@@ -97,7 +111,7 @@ export default function ShortDramaCatalogClient({ initialPopular, initialLatest 
           </p>
 
           {/* Tab Switcher */}
-          <div className="flex flex-wrap items-center gap-2.5 mt-4 pt-4 border-t border-slate-900/80">
+          <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-900/80">
             <button
               onClick={() => { setActiveTab('popular'); setSelectedTag('ALL'); }}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-extrabold transition-all cursor-pointer ${
@@ -106,7 +120,7 @@ export default function ShortDramaCatalogClient({ initialPopular, initialLatest 
                   : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Flame size={14} /> Terpopuler (Dub Indo) ({initialPopular.length})
+              <Flame size={14} /> Terpopuler ({initialPopular.length})
             </button>
             <button
               onClick={() => { setActiveTab('latest'); setSelectedTag('ALL'); }}
@@ -118,6 +132,40 @@ export default function ShortDramaCatalogClient({ initialPopular, initialLatest 
             >
               <Sparkles size={14} /> Rilis Terbaru ({initialLatest.length})
             </button>
+
+            {/* Sub-filter: Drama China vs Dub Indo */}
+            <div className="flex items-center gap-1 ml-auto bg-slate-900/90 border border-slate-800 p-1 rounded-full">
+              <button
+                onClick={() => setCategoryFilter('ALL')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer ${
+                  categoryFilter === 'ALL'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Semua
+              </button>
+              <button
+                onClick={() => setCategoryFilter('DRACHIN')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  categoryFilter === 'DRACHIN'
+                    ? 'bg-rose-500 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                🇨🇳 Drama China Asli
+              </button>
+              <button
+                onClick={() => setCategoryFilter('DUBINDO')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  categoryFilter === 'DUBINDO'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                🎙️ Dub Indo
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -178,10 +226,15 @@ export default function ShortDramaCatalogClient({ initialPopular, initialLatest 
                   </div>
 
                   {/* Badges Top Left */}
-                  <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10">
+                  <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10 items-start">
                     <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-md">
                       9:16 Tegak
                     </span>
+                    {(drama.tags.some(t => t.toLowerCase().includes('drama china')) || drama.title.toLowerCase().includes('china') || drama.title.toLowerCase().includes('sub indo') || !drama.isDubIndo) && (
+                      <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-cyan-600/90 text-white shadow-sm w-fit">
+                        🇨🇳 Drama China
+                      </span>
+                    )}
                     {drama.isDubIndo && (
                       <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-emerald-600/90 text-white shadow-sm w-fit">
                         🎙️ Dub Indo

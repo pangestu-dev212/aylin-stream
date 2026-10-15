@@ -122,7 +122,6 @@ async function fetchDetail(type: string, slug: string, source?: string) {
     if (d && d.episodes && d.episodes.length > 0) return { data: d, resolvedSource: 'otakudesu' };
     const alt = await getSamehadakuDetail(slug).catch(() => null);
     if (alt && alt.episodes && alt.episodes.length > 0) return { data: alt, resolvedSource: 'samehadaku' };
-    // Otakudesu blocked/failed, auto-search Samehadaku
     const fallback = await searchAnimeFallback(slug);
     if (fallback) return fallback;
   } else if (source === 'samehadaku') {
@@ -135,9 +134,17 @@ async function fetchDetail(type: string, slug: string, source?: string) {
   } else if (source === 'animexin') {
     const d = await getAnimeXinDetail(slug).catch(() => null);
     if (d) return { data: d, resolvedSource: 'animexin' };
+    const alt = await getAnichinDetail(slug).catch(() => null);
+    if (alt) return { data: alt, resolvedSource: 'anichin' };
+    const alt2 = await getDonghuastreamDetail(slug).catch(() => null);
+    if (alt2) return { data: alt2, resolvedSource: 'donghuastream' };
   } else if (source === 'donghuastream') {
     const d = await getDonghuastreamDetail(slug).catch(() => null);
     if (d) return { data: d, resolvedSource: 'donghuastream' };
+    const alt = await getAnichinDetail(slug).catch(() => null);
+    if (alt) return { data: alt, resolvedSource: 'anichin' };
+    const alt2 = await getAnimeXinDetail(slug).catch(() => null);
+    if (alt2) return { data: alt2, resolvedSource: 'animexin' };
   } else if (type === 'drama') {
     const d = await getJuraganfilmDetail(slug).catch(() => null);
     if (d) return { data: d, resolvedSource: 'juraganfilm' };
@@ -146,6 +153,8 @@ async function fetchDetail(type: string, slug: string, source?: string) {
     if (d) return { data: d, resolvedSource: 'anichin' };
     const alt = await getAnimeXinDetail(slug).catch(() => null);
     if (alt) return { data: alt, resolvedSource: 'animexin' };
+    const alt2 = await getDonghuastreamDetail(slug).catch(() => null);
+    if (alt2) return { data: alt2, resolvedSource: 'donghuastream' };
   } else {
     // anime default: try Samehadaku direct & Otakudesu direct
     const dSame = await getSamehadakuDetail(slug).catch(() => null);

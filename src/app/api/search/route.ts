@@ -66,11 +66,16 @@ export async function GET(req: NextRequest) {
       searchShortDrama(query).catch(() => [])
     ]);
 
-    const mappedDrama = dramaResults.map(item => ({ ...item, type: 'drama' as const }));
+    const mappedOtaku = otakuResults.map(i => ({ ...i, type: 'anime' as const, source: 'otakudesu' }));
+    const mappedAnichin = anichinResults.map(i => ({ ...i, type: 'donghua' as const, source: 'anichin' }));
+    const mappedDrama = dramaResults.map(item => ({ ...item, type: 'drama' as const, source: 'juraganfilm' }));
+    const mappedSame = sameResults.map(i => ({ ...i, type: 'anime' as const, source: 'samehadaku' }));
+    const mappedAnimexin = animexinResults.map(i => ({ ...i, type: 'donghua' as const, source: 'animexin' }));
+    const mappedDonghuastream = donghuaStreamResults.map(i => ({ ...i, type: 'donghua' as const, source: 'donghuastream' }));
     const mappedManga = mangaResults.map(item => ({ 
       title: item.title, 
       slug: item.slug, 
-      url: item.url, 
+      url: `/manga/${item.slug}`, 
       img: item.img, 
       ep: item.latestChapter, 
       type: 'manga' as const 
@@ -86,14 +91,14 @@ export async function GET(req: NextRequest) {
 
     // Concatenate, placing primary sources first so they are preferred during deduplication
     const combinedRaw = [
-      ...otakuResults,
-      ...anichinResults,
+      ...mappedOtaku,
+      ...mappedAnichin,
       ...mappedDrama,
       ...mappedShortDrama,
       ...mappedManga,
-      ...sameResults,
-      ...animexinResults,
-      ...donghuaStreamResults
+      ...mappedSame,
+      ...mappedAnimexin,
+      ...mappedDonghuastream
     ];
 
     // Deduplicate by normalized title

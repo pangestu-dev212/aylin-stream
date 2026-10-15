@@ -21,12 +21,13 @@ interface AnimeCard {
   slug: string;
   url: string;
   img: string;
-  type: 'anime' | 'donghua' | 'drama';
+  type: 'all' | 'anime' | 'donghua' | 'drama' | 'shortdrama' | 'manga';
+  source?: string;
   ep?: string;
 }
 
 const ALPHABET = [
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+  'ALL', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
   'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'
 ];
 
@@ -44,8 +45,8 @@ const GENRES = [
 ];
 
 export default function CatalogClient() {
-  const [selectedType, setSelectedType] = useState<'anime' | 'donghua' | 'drama'>('anime');
-  const [selectedLetter, setSelectedLetter] = useState<string>('A');
+  const [selectedType, setSelectedType] = useState<'all' | 'anime' | 'donghua' | 'drama' | 'shortdrama' | 'manga'>('all');
+  const [selectedLetter, setSelectedLetter] = useState<string>('ALL');
   const [selectedGenre, setSelectedGenre] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | 'Ongoing' | 'Completed'>('ALL');
   const [page, setPage] = useState<number>(1);
@@ -68,10 +69,9 @@ export default function CatalogClient() {
         }
         const data = await res.json();
         if (data.success) {
-          // Normalize type if from drama
           const mapped = (data.results || []).map((item: any) => ({
             ...item,
-            type: selectedType
+            type: item.type || selectedType
           }));
           setItems(mapped);
           setTotalPages(data.totalPages || 1);
@@ -88,9 +88,9 @@ export default function CatalogClient() {
   }, [selectedType, selectedLetter, selectedGenre, page]);
 
   // Reset page when switching tabs or letters
-  const handleTypeChange = (type: 'anime' | 'donghua' | 'drama') => {
+  const handleTypeChange = (type: 'all' | 'anime' | 'donghua' | 'drama' | 'shortdrama' | 'manga') => {
     setSelectedType(type);
-    setSelectedLetter('A');
+    setSelectedLetter('ALL');
     setSelectedGenre('ALL');
     setSelectedStatus('ALL');
     setPage(1);
@@ -127,22 +127,34 @@ export default function CatalogClient() {
   const handlePlayRandom = () => {
     if (filteredItems.length > 0) {
       const randomItem = filteredItems[Math.floor(Math.random() * filteredItems.length)];
-      window.location.href = `/watch/${randomItem.type}/${randomItem.slug}`;
+      if (randomItem.type === 'shortdrama') {
+        window.location.href = `/shortdrama/${randomItem.slug}`;
+      } else if (randomItem.type === 'manga') {
+        window.location.href = `/manga/${randomItem.slug}`;
+      } else {
+        window.location.href = `/watch/${randomItem.type}/${randomItem.slug}${randomItem.source ? `?source=${randomItem.source}` : ''}`;
+      }
     } else {
       window.location.href = '/';
     }
   };
 
   const getThemeTabColor = () => {
+    if (selectedType === 'all') return 'bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 text-white shadow-lg';
     if (selectedType === 'anime') return 'bg-violet-500 text-white shadow-lg glow-purple';
     if (selectedType === 'donghua') return 'bg-fuchsia-500 text-white shadow-lg glow-fuchsia';
-    return 'bg-amber-500 text-white shadow-lg';
+    if (selectedType === 'drama') return 'bg-amber-500 text-white shadow-lg';
+    if (selectedType === 'shortdrama') return 'bg-rose-500 text-white shadow-lg';
+    return 'bg-emerald-500 text-white shadow-lg';
   };
 
   const getActiveLetterBg = () => {
+    if (selectedType === 'all') return 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-md';
     if (selectedType === 'anime') return 'bg-violet-500 text-white shadow-md';
     if (selectedType === 'donghua') return 'bg-fuchsia-500 text-white shadow-md';
-    return 'bg-amber-500 text-white shadow-md';
+    if (selectedType === 'drama') return 'bg-amber-500 text-white shadow-md';
+    if (selectedType === 'shortdrama') return 'bg-rose-500 text-white shadow-md';
+    return 'bg-emerald-500 text-white shadow-md';
   };
 
   return (
@@ -189,36 +201,66 @@ export default function CatalogClient() {
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 mt-2">
           
           {/* Tabs */}
-          <div className="flex flex-wrap items-center p-1 bg-slate-900/50 border border-slate-900 rounded-2xl sm:rounded-full w-fit gap-1">
+          <div className="flex flex-wrap items-center p-1 bg-slate-900/50 border border-slate-900 rounded-2xl w-fit gap-1">
+            <button
+              onClick={() => handleTypeChange('all')}
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
+                selectedType === 'all' 
+                  ? 'bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 text-white shadow-lg' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              ✨ Semua
+            </button>
             <button
               onClick={() => handleTypeChange('anime')}
-              className={`px-4 sm:px-5 py-2 text-xs font-black rounded-xl sm:rounded-full transition-all cursor-pointer ${
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
                 selectedType === 'anime' 
                   ? 'bg-violet-500 text-white shadow-lg glow-purple' 
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              🇯🇵 Anime Jepang
+              🎌 Anime Jepang
             </button>
             <button
               onClick={() => handleTypeChange('donghua')}
-              className={`px-4 sm:px-5 py-2 text-xs font-black rounded-xl sm:rounded-full transition-all cursor-pointer ${
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
                 selectedType === 'donghua' 
                   ? 'bg-fuchsia-500 text-white shadow-lg glow-fuchsia' 
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              🇨🇳 Donghua China
+              🐉 Donghua China
             </button>
             <button
               onClick={() => handleTypeChange('drama')}
-              className={`px-4 sm:px-5 py-2 text-xs font-black rounded-xl sm:rounded-full transition-all cursor-pointer ${
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
                 selectedType === 'drama' 
                   ? 'bg-amber-500 text-white shadow-lg' 
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              🎬 Movie &amp; Drama
+              🎬 Drama Asia
+            </button>
+            <button
+              onClick={() => handleTypeChange('shortdrama')}
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
+                selectedType === 'shortdrama' 
+                  ? 'bg-rose-500 text-white shadow-lg' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📱 Short Drama 9:16
+            </button>
+            <button
+              onClick={() => handleTypeChange('manga')}
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
+                selectedType === 'manga' 
+                  ? 'bg-emerald-500 text-white shadow-lg' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📖 Manga &amp; Komik
             </button>
           </div>
 
@@ -227,7 +269,7 @@ export default function CatalogClient() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
             <input
               type="text"
-              placeholder={`Cari judul dalam kategori ${selectedLetter}...`}
+              placeholder={`Saring judul (${filteredItems.length} ditampilkan)...`}
               value={filterQuery}
               onChange={(e) => setFilterQuery(e.target.value)}
               className="w-full bg-white/5 border border-white/5 focus:border-slate-800 rounded-full py-2.5 pl-11 pr-4 text-xs font-medium text-slate-100 placeholder-slate-500 outline-none transition-all"
@@ -243,13 +285,13 @@ export default function CatalogClient() {
               <button
                 key={`letter-${letter}`}
                 onClick={() => handleLetterChange(letter)}
-                className={`w-9 h-9 flex items-center justify-center text-xs font-black rounded-xl transition-all cursor-pointer ${
+                className={`min-w-[36px] h-9 px-2 flex items-center justify-center text-xs font-black rounded-xl transition-all cursor-pointer ${
                   selectedLetter === letter
                     ? getActiveLetterBg()
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                 }`}
               >
-                {letter}
+                {letter === 'ALL' ? 'SEMUA' : letter}
               </button>
             ))}
           </div>
@@ -315,18 +357,25 @@ export default function CatalogClient() {
           <div className="flex flex-col gap-8">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
               {filteredItems.map((item, idx) => {
-                const watchPath = `/watch/${item.type}/${item.slug}`;
+                const watchPath = item.type === 'shortdrama'
+                  ? `/shortdrama/${item.slug}`
+                  : item.type === 'manga'
+                  ? `/manga/${item.slug}`
+                  : `/watch/${item.type}/${item.slug}${item.source ? `?source=${item.source}` : ''}`;
                 
+                const getTypeBadge = (itemType: string) => {
+                  if (itemType === 'anime') return { label: '🎌 Anime', bg: 'bg-violet-600/90' };
+                  if (itemType === 'donghua') return { label: '🐉 Donghua', bg: 'bg-fuchsia-600/90' };
+                  if (itemType === 'drama') return { label: '🎬 Drama', bg: 'bg-amber-600/90' };
+                  if (itemType === 'shortdrama') return { label: '📱 9:16', bg: 'bg-rose-600/90' };
+                  return { label: '📖 Manga', bg: 'bg-emerald-600/90' };
+                };
+                const badge = getTypeBadge(item.type);
+
                 return (
                   <div 
                     key={`catalog-${item.slug}-${idx}`}
-                    className={`group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 border border-white/5 hover:border-slate-800 ${
-                      selectedType === 'anime' 
-                        ? 'hover:border-violet-500/20' 
-                        : selectedType === 'donghua'
-                        ? 'hover:border-fuchsia-500/20'
-                        : 'hover:border-amber-500/20'
-                    }`}
+                    className="group relative flex flex-col glass-card rounded-2xl overflow-hidden hover:scale-105 transition-all duration-300 border border-white/5 hover:border-slate-800"
                   >
                     <Link href={watchPath} className="relative aspect-[3/4] overflow-hidden bg-slate-950 flex items-center justify-center">
                       
@@ -340,13 +389,7 @@ export default function CatalogClient() {
                             loading="lazy"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
-                              selectedType === 'anime' 
-                                ? 'bg-violet-500 glow-purple' 
-                                : selectedType === 'donghua'
-                                ? 'bg-fuchsia-500 glow-fuchsia'
-                                : 'bg-amber-500'
-                            }`}>
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${badge.bg}`}>
                               <Play size={16} fill="white" className="ml-0.5" />
                             </div>
                           </div>
@@ -356,7 +399,7 @@ export default function CatalogClient() {
                         <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-900 to-slate-950 flex flex-col justify-between p-4 border border-white/5">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] uppercase font-black text-violet-400 tracking-widest px-2 py-0.5 rounded bg-violet-500/10 border border-violet-500/10">
-                              {selectedType === 'anime' ? 'Anime' : selectedType === 'donghua' ? 'Donghua' : 'Movie'}
+                              {badge.label}
                             </span>
                             <Film size={14} className="text-slate-700" />
                           </div>
@@ -368,10 +411,17 @@ export default function CatalogClient() {
                           </div>
                           
                           <div className="text-[10px] text-slate-500 font-bold text-center border-t border-slate-900 pt-2 tracking-wide uppercase truncate">
-                            Buka Pemutar
+                            Buka Detail
                           </div>
                         </div>
                       )}
+
+                      {/* Type Badge Top Left */}
+                      <div className="absolute top-2 left-2 z-10">
+                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full text-white shadow-md ${badge.bg}`}>
+                          {badge.label}
+                        </span>
+                      </div>
 
                       {/* Episode Badge if present */}
                       {item.ep && (
@@ -385,13 +435,7 @@ export default function CatalogClient() {
                     <div className="p-3.5 flex flex-col justify-between flex-1 gap-2 bg-slate-950/40">
                       <Link 
                         href={watchPath} 
-                        className={`font-bold text-xs sm:text-sm text-slate-200 line-clamp-2 leading-snug transition-colors ${
-                          selectedType === 'anime' 
-                            ? 'group-hover:text-violet-400' 
-                            : selectedType === 'donghua'
-                            ? 'group-hover:text-fuchsia-400'
-                            : 'group-hover:text-amber-400'
-                        }`}
+                        className="font-bold text-xs sm:text-sm text-slate-200 line-clamp-2 leading-snug transition-colors group-hover:text-violet-400"
                       >
                         {item.title}
                       </Link>
@@ -402,8 +446,8 @@ export default function CatalogClient() {
               })}
             </div>
 
-            {/* 5. Pagination Controls (For Donghua & Drama) */}
-            {(selectedType === 'donghua' || selectedType === 'drama') && totalPages > 1 && (
+            {/* 5. Pagination Controls */}
+            {totalPages > 1 && (
               <div className="flex items-center justify-center gap-4 mt-4 pt-6 border-t border-slate-900">
                 <button
                   disabled={page <= 1}
@@ -420,7 +464,7 @@ export default function CatalogClient() {
                   disabled={page >= totalPages}
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   className="p-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-950 disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 border border-slate-800 rounded-xl transition-all cursor-pointer flex items-center justify-center"
-                  title="Halaman Berikutnya"
+                  title="Halaman Selanjutnya"
                 >
                   <ChevronRight size={16} />
                 </button>

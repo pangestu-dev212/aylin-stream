@@ -290,27 +290,42 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
                 )}
               </>
             ) : (
-              <div className="p-6 text-center text-slate-400 flex flex-col items-center justify-center z-10">
+              <div className="p-6 text-center text-slate-400 flex flex-col items-center justify-center z-10 max-w-xs">
                 <Smartphone size={40} className="mx-auto mb-2 text-rose-500/60" />
-                <p className="text-xs font-semibold mb-3">
-                  {videoError ? 'Gagal memuat video stream episode ini.' : 'Stream video belum tersedia.'}
+                <p className="text-xs font-semibold mb-1 text-white">
+                  {videoError ? 'Stream video sedang dibatasi oleh CDN penyedia.' : 'Stream video belum tersedia.'}
                 </p>
-                <button
-                  onClick={() => {
-                    setVideoError(false);
-                    setIsBuffering(true);
-                    if (currentStreamSrc === currentEp?.proxyUrl && currentEp?.rawUrl) {
-                      setCurrentStreamSrc(currentEp.rawUrl);
-                    } else if (currentEp?.proxyUrl) {
-                      setCurrentStreamSrc(currentEp.proxyUrl);
-                    } else if (currentEp?.streamUrl) {
-                      setCurrentStreamSrc(currentEp.streamUrl);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-lg shadow-rose-600/30"
-                >
-                  <RotateCcw size={13} /> Coba Putar Ulang
-                </button>
+                <p className="text-[11px] text-slate-400 mb-4">
+                  Klik tombol di bawah untuk memutar via Server Proxy Aylin Stream atau coba episode lainnya.
+                </p>
+                <div className="flex flex-col gap-2 w-full">
+                  <button
+                    onClick={() => {
+                      setVideoError(false);
+                      setIsBuffering(true);
+                      const baseFallback = currentEp?.proxyUrl || (currentEp?.rawUrl ? `/api/video-proxy?url=${encodeURIComponent(currentEp.rawUrl)}` : '');
+                      if (baseFallback) {
+                        setCurrentStreamSrc(`${baseFallback}${baseFallback.includes('?') ? '&' : '?'}retry=${Date.now()}`);
+                      } else if (currentEp?.streamUrl) {
+                        setCurrentStreamSrc(currentEp.streamUrl);
+                      }
+                    }}
+                    className="w-full px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30"
+                  >
+                    <RotateCcw size={13} /> Putar via Server Proxy
+                  </button>
+                  {currentEpIndex > 0 && (
+                    <button
+                      onClick={() => {
+                        setVideoError(false);
+                        setCurrentEpIndex(0);
+                      }}
+                      className="w-full px-4 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Putar Episode 1 (Gratis)
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

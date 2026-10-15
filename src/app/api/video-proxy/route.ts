@@ -37,6 +37,11 @@ export async function GET(req: NextRequest) {
     headers['Origin'] = 'https://pixeldrain.com';
   }
 
+  if (parsedTarget.hostname.includes('dramaboxdb.com')) {
+    headers['Referer'] = 'https://www.dramaboxdb.com/';
+    headers['Origin'] = 'https://www.dramaboxdb.com';
+  }
+
   try {
     const upstreamRes = await fetch(targetUrl, {
       method: 'GET',
