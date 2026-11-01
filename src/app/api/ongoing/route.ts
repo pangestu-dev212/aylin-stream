@@ -9,6 +9,9 @@ export async function GET(req: NextRequest) {
     let results = [];
     if (type === 'donghua') {
       results = await getAnichinOngoing().catch(() => []);
+      if (!results || results.length === 0) {
+        results = await getAnimeXinOngoing().catch(() => []);
+      }
     } else if (type === 'animexin') {
       // AnimeXin as alternative donghua source
       results = await getAnimeXinOngoing().catch(() => []);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOtakudesuCatalog, getAnichinCatalog, getJuraganfilmCatalog } from '@/lib/stream-scraper';
+import { getOtakudesuCatalog, getAnichinCatalog, getAnimeXinCatalog, getJuraganfilmCatalog } from '@/lib/stream-scraper';
 import { getShortDramaPopular, getShortDramaLatest, FALLBACK_SHORT_DRAMAS } from '@/lib/shortdrama-scraper';
 import { getLatestManga } from '@/lib/manga-scraper';
 import { filterSafeList } from '@/lib/content-filter';
@@ -17,8 +17,11 @@ export async function GET(req: NextRequest) {
     const limit = 24;
 
     if (type === 'donghua') {
-      const data = await getAnichinCatalog(letter === 'ALL' ? 'A' : letter, page);
-      const safeResults = filterSafeList(data.results.map(i => ({ ...i, type: 'donghua' as const, source: 'anichin' })));
+      let data = await getAnichinCatalog(letter === 'ALL' ? 'A' : letter, page).catch(() => ({ results: [], totalPages: 1 }));
+      if (!data.results || data.results.length === 0) {
+        data = await getAnimeXinCatalog(letter, page).catch(() => ({ results: [], totalPages: 1 }));
+      }
+      const safeResults = filterSafeList(data.results.map(i => ({ ...i, type: 'donghua' as const, source: i.source || 'animexin' })));
       return NextResponse.json({ success: true, results: safeResults, totalPages: data.totalPages || 1 });
     } else if (type === 'drama') {
       const data = await getJuraganfilmCatalog(letter, page, genre);
@@ -87,9 +90,15 @@ export async function GET(req: NextRequest) {
         ep: m.latestChapter,
       }));
 
+      let donghuaList = donghua.results || [];
+      if (donghuaList.length === 0) {
+        const animexinData = await getAnimeXinCatalog(letter === 'ALL' ? 'A' : letter, 1).catch(() => ({ results: [], totalPages: 1 }));
+        donghuaList = animexinData.results || [];
+      }
+
       const combined = [
         ...otaku.slice(0, 8).map(i => ({ ...i, type: 'anime' as const, source: 'otakudesu' })),
-        ...donghua.results.slice(0, 8).map(i => ({ ...i, type: 'donghua' as const, source: 'anichin' })),
+        ...donghuaList.slice(0, 8).map(i => ({ ...i, type: 'donghua' as const, source: i.source || 'animexin' })),
         ...drama.results.slice(0, 6).map(i => ({ ...i, type: 'drama' as const, source: 'juraganfilm' })),
         ...mappedShort,
         ...mappedManga

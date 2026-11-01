@@ -1,4 +1,4 @@
-import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getJuraganfilmOngoing, getJikanOngoingAnime } from '@/lib/stream-scraper';
+import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getAnimeXinOngoing, getJuraganfilmOngoing, getJikanOngoingAnime } from '@/lib/stream-scraper';
 import { getLatestManga } from '@/lib/manga-scraper';
 import { getShortDramaPopular } from '@/lib/shortdrama-scraper';
 import { filterSafeList } from '@/lib/content-filter';
@@ -9,10 +9,11 @@ export const revalidate = 180;
 
 export default async function Home() {
   // Fetch all live data sources in parallel
-  const [rawSamehadaku, rawOtakudesu, rawDonghua, rawDrama, rawJikan, rawManga, rawShortDrama] = await Promise.all([
+  const [rawSamehadaku, rawOtakudesu, rawAnichin, rawAnimeXin, rawDrama, rawJikan, rawManga, rawShortDrama] = await Promise.all([
     getSamehadakuOngoing().catch(() => []),
     getOtakudesuOngoing().catch(() => []),
     getAnichinOngoing().catch(() => []),
+    getAnimeXinOngoing().catch(() => []),
     getJuraganfilmOngoing().catch(() => []),
     getJikanOngoingAnime().catch(() => []),
     getLatestManga().catch(() => []),
@@ -25,6 +26,11 @@ export default async function Home() {
     : rawOtakudesu.length > 0
       ? rawOtakudesu
       : rawJikan;
+
+  // Priority for Donghua: Anichin + AnimeXin merged, fallback completely to AnimeXin if Anichin is blocked/empty
+  const rawDonghua = rawAnichin.length > 0
+    ? [...rawAnichin, ...rawAnimeXin.filter(x => !rawAnichin.some(a => a.slug === x.slug || a.title.toLowerCase() === x.title.toLowerCase()))]
+    : rawAnimeXin;
 
   // Deduplicate by slug to prevent React duplicate key warning, strictly filtered for safety
   const ongoingAnime = filterSafeList([...new Map(rawAnime.map(item => [item.slug, item])).values()]);

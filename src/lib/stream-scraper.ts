@@ -2006,6 +2006,60 @@ export async function getAnimeXinSearch(query: string): Promise<AnimeCard[]> {
   }
 }
 
+export async function getAnimeXinCatalog(letter: string = 'ALL', page = 1): Promise<{ results: AnimeCard[], totalPages: number }> {
+  const cacheKey = `animexin:catalog:${letter}:${page}`;
+  const cached = getFromCache<{ results: AnimeCard[], totalPages: number }>(cacheKey, 6 * 60 * 60 * 1000); // 6 hours
+  if (cached) return cached;
+
+  try {
+    const url = `${ANIMEXIN_BASE}/anime/?page=${page}&order=title`;
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+    let results: AnimeCard[] = [];
+
+    $('.listupd article.bs, article.bs').each((i, el) => {
+      const a = $(el).find('a').first();
+      const href = a.attr('href') || '';
+      const title = a.attr('title') || '';
+
+      const ttNode = $(el).find('.tt');
+      const cleanTitle = title || ttNode.clone().children().remove().end().text().trim() || ttNode.text().split('\t')[0].trim();
+
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const ep = $(el).find('.epx').text().trim() || 'Donghua';
+      const slug = extractSlug(href);
+
+      if (cleanTitle && slug) {
+        results.push({
+          title: cleanTitle,
+          slug,
+          url: normalizeUrl(href, ANIMEXIN_BASE),
+          img: normalizeUrl(img, ANIMEXIN_BASE),
+          ep,
+          type: 'donghua',
+          source: 'animexin'
+        });
+      }
+    });
+
+    if (letter && letter !== 'ALL') {
+      results = results.filter(item => {
+        const firstChar = item.title.trim().charAt(0).toUpperCase();
+        if (letter === '#') return /[^A-Z]/.test(firstChar);
+        return firstChar === letter.toUpperCase();
+      });
+    }
+
+    const result = { results, totalPages: 10 };
+    setInCache(cacheKey, result);
+    return result;
+  } catch (err) {
+    console.error("Error in getAnimeXinCatalog:", err);
+    return { results: [], totalPages: 1 };
+  }
+}
+
+
 // ==========================================
 // DONGHUASTREAM SCRAPER (ALTERNATIVE DONGHUA)
 // ==========================================
