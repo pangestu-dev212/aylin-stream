@@ -31,10 +31,53 @@ const STOP_WORDS = new Set([
   'at', 'by', 'from', 'no', 'wa', 'ga', 'ni', 'de', 'wo', 'da', 'ka', 'te'
 ]);
 
+function generateDirectSlugCandidates(slug: string): string[] {
+  const cleaned = slug
+    .replace(/^(anilist|jikan)-\d+-/, '')
+    .replace(/-sub-indo$/i, '')
+    .toLowerCase();
+
+  const seasonMatch = slug.match(/season[- ](\d+)|part[- ](\d+)|s(\d+)|-(\d+)(?:st|nd|rd|th)?[- ]season/i);
+  const seasonNum = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3] || seasonMatch[4]) : null;
+
+  const baseName = cleaned
+    .replace(/-(?:season|part|s)[- ]?\d+.*$/i, '')
+    .replace(/-(?:2nd|3rd|4th|5th)[- ]?season.*$/i, '')
+    .trim();
+
+  const candidates = new Set<string>();
+
+  if (seasonNum) {
+    candidates.add(`${baseName}-s${seasonNum}-sub-indo`);
+    candidates.add(`${baseName}-season-${seasonNum}-sub-indo`);
+    candidates.add(`${baseName}-season-${seasonNum}`);
+    candidates.add(`${baseName}-s${seasonNum}`);
+  }
+  candidates.add(`${baseName}-sub-indo`);
+  candidates.add(`${baseName}`);
+  candidates.add(`${cleaned}-sub-indo`);
+  candidates.add(cleaned);
+
+  return Array.from(candidates);
+}
+
 async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedSource: string } | null> {
+  // 1. Try high-probability direct slug candidates first (instant, exact match)
+  const directSlugs = generateDirectSlugCandidates(slug);
+  for (const directSlug of directSlugs) {
+    const dOtaku = await getOtakudesuDetail(directSlug).catch(() => null);
+    if (dOtaku && dOtaku.episodes && dOtaku.episodes.length > 0) {
+      return { data: dOtaku, resolvedSource: 'otakudesu' };
+    }
+    const dSame = await getSamehadakuDetail(directSlug).catch(() => null);
+    if (dSame && dSame.episodes && dSame.episodes.length > 0) {
+      return { data: dSame, resolvedSource: 'samehadaku' };
+    }
+  }
+
   const searchTitles: string[] = [];
 
-  // 1. If it's an AniList slug, fetch precise Romaji & English titles directly
+  // 2. If it's an AniList slug, fetch precise Romaji & English titles directly
   const anilistMatch = slug.match(/^anilist-(\d+)/);
   if (anilistMatch) {
     const aniId = parseInt(anilistMatch[1], 10);
@@ -48,7 +91,7 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
     }
   }
 
-  // 2. Also clean the slug itself
+  // 3. Also clean the slug itself
   const rawClean = slug
     .replace(/^(anilist|jikan)-\d+-/, '')
     .replace(/-sub-indo$/i, '')
@@ -64,13 +107,22 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
 
   if (searchTitles.length === 0) return null;
 
+  // Expand compound word variations (e.g. "aoashi" -> "ao ashi")
+  const expandedTitles: string[] = [];
+  for (const t of searchTitles) {
+    expandedTitles.push(t);
+    if (/aoashi/i.test(t)) {
+      expandedTitles.push(t.replace(/aoashi/gi, 'ao ashi'));
+    }
+  }
+
   // Extract season number
   const seasonMatch = slug.match(/season[- ](\d+)|part[- ](\d+)|s(\d+)/i);
   const seasonNum = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3]) : null;
   const romanMap: Record<number, string> = { 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v' };
   const romanNum = seasonNum ? romanMap[seasonNum] || null : null;
 
-  for (const baseTitle of searchTitles) {
+  for (const baseTitle of expandedTitles) {
     const allWords = baseTitle.split(/\s+/).map(w => w.trim()).filter(Boolean);
     const meaningfulWords = allWords.filter(w => !STOP_WORDS.has(w.toLowerCase()) && w.length >= 2);
 
