@@ -299,10 +299,10 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
               <div className="p-6 text-center text-slate-400 flex flex-col items-center justify-center z-10 max-w-xs">
                 <Smartphone size={40} className="mx-auto mb-2 text-rose-500/60" />
                 <p className="text-xs font-semibold mb-1 text-white">
-                  {videoError ? 'Stream video sedang dibatasi oleh CDN penyedia.' : 'Stream video belum tersedia.'}
+                  {videoError ? 'Stream Video Terproteksi oleh Server DramaBox' : 'Episode Belum Tersedia dari Server Penyedia'}
                 </p>
-                <p className="text-[11px] text-slate-400 mb-4">
-                  Klik tombol di bawah untuk memutar via Server Proxy Aylin Stream atau coba episode lainnya.
+                <p className="text-[11px] text-slate-300 mb-4 leading-relaxed">
+                  Penyedia DramaBox menerapkan proteksi DRM / IP restriction pada episode ini. Anda dapat mencoba episode lain atau menonton ratusan drama & film Asia di kategori Drama & Film.
                 </p>
                 <div className="flex flex-col gap-2 w-full">
                   <button

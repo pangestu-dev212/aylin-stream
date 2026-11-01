@@ -321,9 +321,6 @@ async function fetchWithRetry(url: string, retries = 2, timeoutMs = 12000): Prom
   return null;
 }
 
-// Verified playable stream for fallback / demonstration when upstream CDN restricts direct tokens
-const FALLBACK_STREAM_URL = 'https://www.w3schools.com/html/mov_bbb.mp4';
-
 export function getFallbackDetail(bookId: string): ShortDramaDetail | null {
   const card = FALLBACK_SHORT_DRAMAS.find(d => d.bookId === bookId) || 
                FALLBACK_SHORT_DRAMAS.find(d => d.slug.includes(bookId)) ||
@@ -334,14 +331,12 @@ export function getFallbackDetail(bookId: string): ShortDramaDetail | null {
   const episodes: ShortDramaEpisode[] = [];
 
   for (let i = 1; i <= count; i++) {
-    const proxyUrl = `/api/video-proxy?url=${encodeURIComponent(FALLBACK_STREAM_URL)}`;
-    const streamUrl = i === 1 ? FALLBACK_STREAM_URL : proxyUrl;
     episodes.push({
       episodeNo: i,
       name: `Episode ${i}`,
-      streamUrl,
-      rawUrl: FALLBACK_STREAM_URL,
-      proxyUrl,
+      streamUrl: '',
+      rawUrl: '',
+      proxyUrl: '',
       cover: card.cover,
       isCharge: i > 5,
     });
