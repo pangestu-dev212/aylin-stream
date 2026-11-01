@@ -337,14 +337,24 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
   const cached = getCached<MangaDetail>(cacheKey);
   if (cached && isContentSafe(cached)) return cached;
 
+  const cleanBaseSlug = slug
+    .replace(/^komik-/, '')
+    .replace(/-indonesia$/, '')
+    .replace(/-indo$/, '')
+    .replace(/-id$/, '');
+
+  const candidateSlugs = [
+    slug,
+    cleanBaseSlug,
+    `${cleanBaseSlug}-id`,
+    `${cleanBaseSlug}-indonesia`,
+    `komik-${cleanBaseSlug}`,
+    `komik-${cleanBaseSlug}-indo`,
+    `${cleanBaseSlug}-indo`,
+  ].filter((s, i, a) => s && a.indexOf(s) === i);
+
   // 1. Try Komiku
   try {
-    const candidateSlugs = [
-      slug,
-      slug.startsWith('komik-') ? slug : `komik-${slug}-indo`,
-      slug.replace(/^komik-/, '').replace(/-indo$/, '')
-    ];
-
     for (const testSlug of candidateSlugs) {
       try {
         const url = `${KOMIKU_BASE}/manga/${testSlug}/`;
@@ -407,14 +417,15 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
   try {
     const bases = [KOMIKINDO_BASE, KOMIKINDO_ALT];
     for (const base of bases) {
-      try {
-        const url = `${base}/komik/${slug}/`;
-        const html = await fetchHtml(url);
-        const $ = cheerio.load(html);
+      for (const testSlug of candidateSlugs) {
+        try {
+          const url = `${base}/komik/${testSlug}/`;
+          const html = await fetchHtml(url);
+          const $ = cheerio.load(html);
 
-        const rawTitle = $('h1.entry-title').text().trim() || $('h1').text().trim();
-        const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
-        if (!title) continue;
+          const rawTitle = $('h1.entry-title').text().trim() || $('h1').text().trim();
+          const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
+          if (!title) continue;
 
         const img = $('.thumb img').attr('data-src') || $('.thumb img').attr('src') || '';
         const synopsis = $('.entry-content-single').text().trim() || 'Sinopsis belum tersedia.';
@@ -482,7 +493,8 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
         return detail;
       } catch {}
     }
-  } catch (err) {
+  }
+} catch (err) {
     console.error(`[MangaScraper] Error fetching manga detail for ${slug}:`, err);
   }
 

@@ -67,6 +67,33 @@ async function fetchImageWithDoh(urlStr: string): Promise<{ buffer: Buffer; cont
   });
 }
 
+interface CachedImage {
+  buffer: Buffer;
+  contentType: string;
+  timestamp: number;
+}
+const imageMemoryCache = new Map<string, CachedImage>();
+const MAX_IMAGE_CACHE_ENTRIES = 300;
+const IMAGE_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours memory cache
+
+function getCachedImage(url: string): CachedImage | null {
+  const item = imageMemoryCache.get(url);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > IMAGE_CACHE_TTL_MS) {
+    imageMemoryCache.delete(url);
+    return null;
+  }
+  return item;
+}
+
+function setCachedImage(url: string, buffer: Buffer, contentType: string) {
+  if (imageMemoryCache.size >= MAX_IMAGE_CACHE_ENTRIES) {
+    const oldestKey = imageMemoryCache.keys().next().value;
+    if (oldestKey) imageMemoryCache.delete(oldestKey);
+  }
+  imageMemoryCache.set(url, { buffer, contentType, timestamp: Date.now() });
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -74,6 +101,18 @@ export async function GET(req: NextRequest) {
 
     if (!imageUrl) {
       return new NextResponse('Missing url parameter', { status: 400 });
+    }
+
+    // 0. Check in-memory image cache (sub-millisecond instant response)
+    const memCached = getCachedImage(imageUrl);
+    if (memCached) {
+      return new NextResponse(new Uint8Array(memCached.buffer), {
+        headers: {
+          'Content-Type': memCached.contentType,
+          'Cache-Control': 'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
+          'X-Image-Cache': 'HIT',
+        },
+      });
     }
 
     // 1. Try fast direct fetch first (works for 90%+ unblocked CDNs)
@@ -87,11 +126,15 @@ export async function GET(req: NextRequest) {
       });
       if (directRes.ok) {
         const arrayBuf = await directRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
         const contentType = directRes.headers.get('content-type') || 'image/jpeg';
-        return new NextResponse(new Uint8Array(arrayBuf), {
+        setCachedImage(imageUrl, buffer, contentType);
+
+        return new NextResponse(new Uint8Array(buffer), {
           headers: {
             'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400',
+            'Cache-Control': 'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
+            'X-Image-Cache': 'MISS',
           },
         });
       }
@@ -99,11 +142,13 @@ export async function GET(req: NextRequest) {
 
     // 2. Fallback to server-side DoH resolution
     const { buffer, contentType } = await fetchImageWithDoh(imageUrl);
+    setCachedImage(imageUrl, buffer, contentType);
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400',
+        'Cache-Control': 'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
+        'X-Image-Cache': 'DOH-MISS',
       },
     });
   } catch (err) {

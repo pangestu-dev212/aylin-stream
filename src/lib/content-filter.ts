@@ -146,6 +146,18 @@ export const FORBIDDEN_GENRES_AND_TAGS: string[] = [
   'ntr',
 ];
 
+// Short keywords that must match whole words/tokens, NOT arbitrary substrings
+// to prevent false positives like 'intrik' / 'kontrak' matching 'ntr', or 'melayari' matching 'yari'.
+const EXACT_WORD_KEYWORDS = new Set([
+  'ntr', 'sex', 'yari', 'xxx', 'r18', 'r-18', 'r 18', '18+', 'nsfw', 'milf', 'lewd', 'shota'
+]);
+
+function matchesWord(text: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+  return regex.test(text);
+}
+
 /**
  * Checks if a string contains any forbidden NSFW/pornographic keywords
  */
@@ -154,8 +166,14 @@ export function isNsfwText(text: string | undefined | null): boolean {
   const clean = text.toLowerCase();
 
   for (const keyword of FORBIDDEN_KEYWORDS) {
-    if (clean.includes(keyword)) {
-      return true;
+    if (EXACT_WORD_KEYWORDS.has(keyword) || keyword.length <= 4) {
+      if (matchesWord(clean, keyword)) {
+        return true;
+      }
+    } else {
+      if (clean.includes(keyword)) {
+        return true;
+      }
     }
   }
   return false;

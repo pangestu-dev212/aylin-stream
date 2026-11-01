@@ -365,10 +365,10 @@ export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDet
   if (cached && cached.episodes?.length > 0) return cached;
 
   try {
-    // 1. Fetch metadata and episodes concurrently with automatic retries
+    // 1. Fetch metadata and episodes concurrently with automatic retries (supports /details and /get-allepisodes)
     const [detailRes, episodesRes] = await Promise.all([
-      fetchWithRetry(`${SANSEKAI_BASE}/dramabox/detail?bookId=${encodeURIComponent(cleanId)}&lang=id`),
-      fetchWithRetry(`${SANSEKAI_BASE}/dramabox/get-allepisode?bookId=${encodeURIComponent(cleanId)}`),
+      fetchWithRetry(`${SANSEKAI_BASE}/dramabox/details?bookId=${encodeURIComponent(cleanId)}&lang=id`).then(r => r || fetchWithRetry(`${SANSEKAI_BASE}/dramabox/detail?bookId=${encodeURIComponent(cleanId)}&lang=id`)),
+      fetchWithRetry(`${SANSEKAI_BASE}/dramabox/get-allepisodes?bookId=${encodeURIComponent(cleanId)}`).then(r => r || fetchWithRetry(`${SANSEKAI_BASE}/dramabox/get-allepisode?bookId=${encodeURIComponent(cleanId)}`)),
     ]);
 
     const info = detailRes?.data || detailRes || {};

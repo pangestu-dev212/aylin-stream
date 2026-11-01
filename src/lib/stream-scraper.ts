@@ -1431,6 +1431,57 @@ export async function getWeeklySchedule(): Promise<DaySchedule[]> {
   }
 }
 
+export async function getDonghuaSchedule(): Promise<DaySchedule[]> {
+  const cacheKey = `stream:donghua_weekly_schedule`;
+  const cached = getFromCache<DaySchedule[]>(cacheKey, 2 * 60 * 60 * 1000); // 2 hours
+  if (cached) return cached;
+
+  const dayMap: Record<string, string> = {
+    'sunday': 'Minggu',
+    'monday': 'Senin',
+    'tuesday': 'Selasa',
+    'wednesday': 'Rabu',
+    'thursday': 'Kamis',
+    'friday': 'Jumat',
+    'saturday': 'Sabtu'
+  };
+
+  try {
+    const html = await fetchHtml(`${ANIMEXIN_BASE}/schedule/`);
+    const $ = cheerio.load(html);
+    const schedule: DaySchedule[] = [];
+
+    $('.schedulepage').each((i, el) => {
+      const rawDay = $(el).find('.releases h3, .releases h2, h2, h3').first().text().trim().toLowerCase();
+      const idDay = dayMap[rawDay] || (rawDay.charAt(0).toUpperCase() + rawDay.slice(1));
+      const animeList: { title: string; slug: string; url: string }[] = [];
+
+      $(el).find('.bsx, .bs, article').each((j, item) => {
+        const title = $(item).find('a').attr('title') || $(item).find('.tt').text().trim();
+        const href = $(item).find('a').attr('href') || '';
+        const slug = extractSlug(href);
+        if (title && slug) {
+          animeList.push({ title, slug, url: href });
+        }
+      });
+
+      if (idDay && animeList.length > 0) {
+        schedule.push({ day: idDay, anime: animeList });
+      }
+    });
+
+    if (schedule.length > 0) {
+      setInCache(cacheKey, schedule);
+      return schedule;
+    }
+    return [];
+  } catch (err: any) {
+    console.warn("[AnimeXin] getDonghuaSchedule notice:", err?.message || err);
+    return [];
+  }
+}
+
+
 // ==========================================
 // SAMEHADAKU SCRAPER (ALTERNATIVE ANIME)
 // ==========================================
