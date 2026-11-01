@@ -106,6 +106,19 @@ export default function DashboardClient({
         if (lowerGenre === 'mystery') {
           return titleLower.includes('mystery') || titleLower.includes('bloody') || titleLower.includes('smart') || titleLower.includes('thriller') || titleLower.includes('detective') || titleLower.includes('death') || titleLower.includes('kill') || titleLower.includes('crime');
         }
+        if (lowerGenre === 'indonesia') {
+          return titleLower.includes('indonesia') || 
+                 titleLower.includes('film indonesia') || 
+                 titleLower.includes('ipar adalah maut') ||
+                 titleLower.includes('agak laen') ||
+                 titleLower.includes('siksa kubur') ||
+                 titleLower.includes('kang mak') ||
+                 titleLower.includes('sekawan limo') ||
+                 titleLower.includes('badarawuhi') ||
+                 titleLower.includes('vina') ||
+                 titleLower.includes('dua hati biru') ||
+                 (item.ep && item.ep.toLowerCase().includes('indonesia'));
+        }
         if (lowerGenre === 'kids') {
           return titleLower.includes('kids') || titleLower.includes('family') || titleLower.includes('animation') || titleLower.includes('toy') || titleLower.includes('bato') || titleLower.includes('cartoon') || titleLower.includes('children');
         }
@@ -156,6 +169,7 @@ export default function DashboardClient({
     const letters = ['ALL', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), '#'];
     const genres = [
       { id: 'ALL', label: 'Semua Kategori' },
+      { id: 'indonesia', label: '🇮🇩 Film Indonesia' },
       { id: 'action', label: '⚔️ Action & Fight' },
       { id: 'romance', label: '💖 Romance & Drama' },
       { id: 'comedy', label: '😂 Comedy & Fun' },

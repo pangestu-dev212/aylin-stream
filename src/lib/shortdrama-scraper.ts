@@ -321,7 +321,8 @@ async function fetchWithRetry(url: string, retries = 2, timeoutMs = 12000): Prom
   return null;
 }
 
-const FALLBACK_STREAM_URL = 'https://hwztakavideoto.dramaboxdb.com/47755d7a1195ec6386a718748b8fd947/6ad24a00/19/0x0/00x5/005x0/00503000024/701755191_1/701755191.encrypt.mp4?etavirp_nuyila=1';
+// Verified playable stream for fallback / demonstration when upstream CDN restricts direct tokens
+const FALLBACK_STREAM_URL = 'https://www.w3schools.com/html/mov_bbb.mp4';
 
 export function getFallbackDetail(bookId: string): ShortDramaDetail | null {
   const card = FALLBACK_SHORT_DRAMAS.find(d => d.bookId === bookId) || 

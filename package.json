@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",
+    "@zhadev/dramabox": "^0.0.2",
     "artplayer": "^5.4.0",
     "cheerio": "^1.2.0",
     "hls.js": "^1.6.16",

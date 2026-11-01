@@ -7,7 +7,8 @@ import {
   getAnimeXinDetail,
   getSamehadakuDetail,
   getSamehadakuSearch,
-  getDonghuastreamDetail
+  getDonghuastreamDetail,
+  getAniListTitleInfo
 } from '@/lib/stream-scraper';
 import WatchClient from './WatchClient';
 import Link from 'next/link';
@@ -25,8 +26,30 @@ interface PageProps {
   }>;
 }
 
+const STOP_WORDS = new Set([
+  'i', 'm', 'a', 'an', 'the', 'to', 'in', 'on', 'of', 'and', 'or', 'for', 'with', 
+  'at', 'by', 'from', 'no', 'wa', 'ga', 'ni', 'de', 'wo', 'da', 'ka', 'te'
+]);
+
 async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedSource: string } | null> {
-  const cleanTitle = slug
+  const searchTitles: string[] = [];
+
+  // 1. If it's an AniList slug, fetch precise Romaji & English titles directly
+  const anilistMatch = slug.match(/^anilist-(\d+)/);
+  if (anilistMatch) {
+    const aniId = parseInt(anilistMatch[1], 10);
+    const titleInfo = await getAniListTitleInfo(aniId);
+    if (titleInfo) {
+      if (titleInfo.romaji) searchTitles.push(titleInfo.romaji);
+      if (titleInfo.english && titleInfo.english !== titleInfo.romaji) searchTitles.push(titleInfo.english);
+      if (Array.isArray(titleInfo.synonyms)) {
+        searchTitles.push(...titleInfo.synonyms.slice(0, 2));
+      }
+    }
+  }
+
+  // 2. Also clean the slug itself
+  const rawClean = slug
     .replace(/^(anilist|jikan)-\d+-/, '')
     .replace(/-sub-indo$/i, '')
     .replace(/-episode-\d+.*$/i, '')
@@ -35,71 +58,85 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
     .replace(/-/g, ' ')
     .trim();
 
-  if (!cleanTitle) return null;
+  if (rawClean && !searchTitles.includes(rawClean)) {
+    searchTitles.push(rawClean);
+  }
 
-  const words = cleanTitle.split(' ');
-  const firstWord = words[0].toLowerCase();
+  if (searchTitles.length === 0) return null;
 
-  // Extract season/part number from original slug (e.g. "season-3" → 3, "part-2" → 2)
+  // Extract season number
   const seasonMatch = slug.match(/season[- ](\d+)|part[- ](\d+)|s(\d+)/i);
   const seasonNum = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3]) : null;
-  // Roman numerals map: season 2 → ii, season 3 → iii, etc.
   const romanMap: Record<number, string> = { 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v' };
   const romanNum = seasonNum ? romanMap[seasonNum] || null : null;
 
-  // Helper: does result title contain at least first keyword?
-  const isRelevant = (title: string) => title.toLowerCase().includes(firstWord);
+  for (const baseTitle of searchTitles) {
+    const allWords = baseTitle.split(/\s+/).map(w => w.trim()).filter(Boolean);
+    const meaningfulWords = allWords.filter(w => !STOP_WORDS.has(w.toLowerCase()) && w.length >= 2);
 
-  // Score a candidate: higher = better match
-  const score = (title: string): number => {
-    const t = title.toLowerCase();
-    let s = 0;
-    // Exact match wins
-    if (t === cleanTitle.toLowerCase()) return 1000;
-    // Season number match (roman or digit)
-    if (romanNum && t.includes(romanNum)) s += 50;
-    if (seasonNum && t.includes(`season ${seasonNum}`)) s += 50;
-    if (seasonNum && t.includes(`s${seasonNum}`)) s += 30;
-    // Not a special/ova (avoid these for season searches)
-    if (!t.includes('special') && !t.includes('ova') && !t.includes('movie')) s += 20;
-    // Starts with first 2 words
-    if (t.startsWith(words.slice(0, 2).join(' ').toLowerCase())) s += 10;
-    return s;
-  };
+    if (meaningfulWords.length === 0) continue;
 
-  // Get sorted candidate matches by relevance and score
-  const getSortedCandidates = (results: any[]): any[] => {
-    const relevant = results.filter(s => isRelevant(s.title));
-    return relevant.sort((a, b) => score(b.title) - score(a.title));
-  };
+    const primaryKeyword = meaningfulWords.find(w => w.length >= 3)?.toLowerCase() || meaningfulWords[0].toLowerCase();
+    if (!primaryKeyword || primaryKeyword.length < 2) continue;
 
-  // Try progressively shorter queries: 3 words → 2 words → 1 word
-  const queries = [
-    words.slice(0, 3).join(' '),
-    words.slice(0, 2).join(' '),
-    words[0]
-  ].filter((q, i, arr) => arr.indexOf(q) === i); // deduplicate
+    // Strict relevance: candidate must contain primary meaningful keyword (never single character)
+    const isRelevant = (candidateTitle: string): boolean => {
+      const lower = candidateTitle.toLowerCase();
+      if (!lower.includes(primaryKeyword)) return false;
+      if (meaningfulWords.length >= 2) {
+        const secondKeyword = meaningfulWords.find(w => w.toLowerCase() !== primaryKeyword && w.length >= 3)?.toLowerCase();
+        if (secondKeyword && !lower.includes(secondKeyword)) {
+          return lower.startsWith(primaryKeyword);
+        }
+      }
+      return true;
+    };
 
-  // Try Samehadaku first (works reliably on Vercel)
-  for (const query of queries) {
-    const results = await getSamehadakuSearch(query).catch(() => []);
-    const sorted = getSortedCandidates(results);
-    for (const cand of sorted) {
-      const d = await getSamehadakuDetail(cand.slug).catch(() => null);
-      if (d && d.episodes && d.episodes.length > 0) {
-        return { data: d, resolvedSource: 'samehadaku' };
+    const score = (candidateTitle: string): number => {
+      const t = candidateTitle.toLowerCase();
+      let s = 0;
+      if (t === baseTitle.toLowerCase()) return 1000;
+      if (romanNum && t.includes(romanNum)) s += 50;
+      if (seasonNum && t.includes(`season ${seasonNum}`)) s += 50;
+      if (seasonNum && t.includes(`s${seasonNum}`)) s += 30;
+      if (!t.includes('special') && !t.includes('ova') && !t.includes('movie')) s += 20;
+      if (t.startsWith(meaningfulWords.slice(0, 2).join(' ').toLowerCase())) s += 15;
+      return s;
+    };
+
+    const getSortedCandidates = (results: any[]): any[] => {
+      const relevant = results.filter(s => isRelevant(s.title));
+      return relevant.sort((a, b) => score(b.title) - score(a.title));
+    };
+
+    // Construct search queries without stop words
+    const queries = [
+      meaningfulWords.slice(0, 3).join(' '),
+      meaningfulWords.slice(0, 2).join(' '),
+      meaningfulWords[0]
+    ].filter((q, i, arr) => q && q.length >= 3 && arr.indexOf(q) === i);
+
+    // 1. Try Samehadaku
+    for (const query of queries) {
+      const results = await getSamehadakuSearch(query).catch(() => []);
+      const sorted = getSortedCandidates(results);
+      for (const cand of sorted) {
+        const d = await getSamehadakuDetail(cand.slug).catch(() => null);
+        if (d && d.episodes && d.episodes.length > 0) {
+          return { data: d, resolvedSource: 'samehadaku' };
+        }
       }
     }
-  }
 
-  // Try Otakudesu fallback
-  for (const query of queries) {
-    const results = await getOtakudesuSearch(query).catch(() => []);
-    const sorted = getSortedCandidates(results);
-    for (const cand of sorted) {
-      const d = await getOtakudesuDetail(cand.slug).catch(() => null);
-      if (d && d.episodes && d.episodes.length > 0) {
-        return { data: d, resolvedSource: 'otakudesu' };
+    // 2. Try Otakudesu fallback
+    for (const query of queries) {
+      const results = await getOtakudesuSearch(query).catch(() => []);
+      const sorted = getSortedCandidates(results);
+      for (const cand of sorted) {
+        const d = await getOtakudesuDetail(cand.slug).catch(() => null);
+        if (d && d.episodes && d.episodes.length > 0) {
+          return { data: d, resolvedSource: 'otakudesu' };
+        }
       }
     }
   }

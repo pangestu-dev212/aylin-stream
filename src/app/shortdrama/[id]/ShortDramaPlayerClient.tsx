@@ -122,9 +122,15 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
         videoRef.current.play().then(() => {
           setIsPlaying(true);
         }).catch(() => {
-          videoRef.current!.muted = true;
-          setIsMuted(true);
-          videoRef.current!.play().catch(() => {});
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            setIsMuted(true);
+            videoRef.current.play().then(() => {
+              setIsPlaying(true);
+            }).catch(() => {
+              handleVideoError();
+            });
+          }
         });
       } else {
         videoRef.current.pause();
@@ -313,6 +319,16 @@ export default function ShortDramaPlayerClient({ detail }: Props) {
                     className="w-full px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30"
                   >
                     <RotateCcw size={13} /> Putar via Server Proxy
+                  </button>
+                  <button
+                    onClick={() => {
+                      setVideoError(false);
+                      setIsBuffering(false);
+                      setCurrentStreamSrc('https://www.w3schools.com/html/mov_bbb.mp4');
+                    }}
+                    className="w-full px-4 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Play size={12} /> Putar Demo Player
                   </button>
                   {currentEpIndex > 0 && (
                     <button

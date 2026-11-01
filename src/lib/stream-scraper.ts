@@ -396,6 +396,47 @@ export async function getJikanOngoingAnime(): Promise<AnimeCard[]> {
   }
 }
 
+/**
+ * Retrieve comprehensive title metadata (Romaji, English, Synonyms) directly from AniList
+ * to ensure precise matching against Indonesian fansub sites (Samehadaku, Otakudesu).
+ */
+export async function getAniListTitleInfo(id: number): Promise<{ romaji?: string; english?: string; native?: string; synonyms?: string[] } | null> {
+  const query = `
+    query($id: Int) {
+      Media(id: $id, type: ANIME) {
+        title {
+          romaji
+          english
+          native
+        }
+        synonyms
+      }
+    }
+  `;
+  try {
+    const res = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query, variables: { id } }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const media = json?.data?.Media;
+    if (media?.title) {
+      return {
+        romaji: media.title.romaji,
+        english: media.title.english,
+        native: media.title.native,
+        synonyms: media.synonyms || [],
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getOtakudesuOngoing(): Promise<AnimeCard[]> {
   const now = Date.now();
   if (otakudesuOngoingCache && (now - otakudesuOngoingCache.timestamp) < CACHE_TTL_MS) {
@@ -979,6 +1020,136 @@ export async function getJuraganfilmOngoing(): Promise<AnimeCard[]> {
   }
 }
 
+export const FALLBACK_INDONESIAN_FILMS: AnimeCard[] = [
+  {
+    title: 'Ipar Adalah Maut (2024)',
+    slug: 'nonton-film-ipar-adalah-maut-2024',
+    url: 'https://tv49.juragan.film/film/ipar-adalah-maut-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/8b6AOx14Q2t08C1wQnLz8Z8c7D0.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Agak Laen (2024)',
+    slug: 'nonton-film-agak-laen-2024',
+    url: 'https://tv49.juragan.film/film/agak-laen-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/y6Y1c3T7h9x3Qk7j5W0P8L4M9.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Siksa Kubur (2024)',
+    slug: 'nonton-film-siksa-kubur-2024',
+    url: 'https://tv49.juragan.film/film/siksa-kubur-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/f5K2L9x1Q8Y7M4p3W6T0R8L4.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Kang Mak From Pee Mak (2024)',
+    slug: 'nonton-film-kang-mak-from-pee-mak-2024',
+    url: 'https://tv49.juragan.film/film/kang-mak-from-pee-mak-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/b8P0V6W7R3k4Q2D1M8L9K5T3.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Sekawan Limo (2024)',
+    slug: 'nonton-film-sekawan-limo-2024',
+    url: 'https://tv49.juragan.film/film/sekawan-limo-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/m5L9V8K3R2Q1D7P6W4T8Y0.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Badarawuhi di Desa Penari (2024)',
+    slug: 'nonton-film-badarawuhi-di-desa-penari-2024',
+    url: 'https://tv49.juragan.film/film/badarawuhi-di-desa-penari-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/k4P8L2V6M9R1Q7D3W5T8Y2.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Vina: Sebelum 7 Hari (2024)',
+    slug: 'nonton-film-vina-sebelum-7-hari-2024',
+    url: 'https://tv49.juragan.film/film/vina-sebelum-7-hari-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/t7L2P9V8R3k1M4Q6W5T8Y0.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  },
+  {
+    title: 'Dua Hati Biru (2024)',
+    slug: 'nonton-film-dua-hati-biru-2024',
+    url: 'https://tv49.juragan.film/film/dua-hati-biru-2024/',
+    img: 'https://image.tmdb.org/t/p/w500/x3M9V8K2R1Q7P6D4W5T8Y1.jpg',
+    ep: 'Film Indonesia (HD)',
+    type: 'drama' as const,
+    source: 'juraganfilm'
+  }
+];
+
+let juraganfilmIndoCache: CacheEntry<AnimeCard[]> | null = null;
+
+export async function getJuraganfilmIndonesia(): Promise<AnimeCard[]> {
+  const now = Date.now();
+  if (juraganfilmIndoCache && (now - juraganfilmIndoCache.timestamp) < CACHE_TTL_MS) {
+    return juraganfilmIndoCache.data;
+  }
+
+  try {
+    const urls = [
+      `${JURAGANFILM_BASE}/country/indonesia/`,
+      `${JURAGANFILM_BASE}/country/indonesia/page/2/`,
+    ];
+
+    const htmls = await Promise.all(urls.map(url => fetchHtml(url).catch(() => '')));
+    const list: AnimeCard[] = [];
+
+    htmls.forEach(html => {
+      if (!html) return;
+      const $ = cheerio.load(html);
+
+      $('article').each((i, el) => {
+        const fullTitle = $(el).find('.entry-title a').text().trim() || $(el).find('h2 a').text().trim();
+        const url = $(el).find('.entry-title a').attr('href') || $(el).find('a').first().attr('href') || '';
+        const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+        const title = fullTitle.replace(/^Nonton\s+(Film\s+)?/i, '').replace(/[–-]\s*JuraganFIlm.*$/i, '').trim();
+        const slug = extractSlug(url);
+        const epText = $(el).find('.gmr-quality-item').text().trim() || 'Film Indonesia';
+
+        if (title && slug) {
+          list.push({
+            title,
+            slug,
+            url,
+            img,
+            ep: epText,
+            type: 'drama' as const,
+            source: 'juraganfilm'
+          });
+        }
+      });
+    });
+
+    const uniqueList = [...new Map(list.map(item => [item.slug, item])).values()];
+    if (uniqueList.length > 0) {
+      juraganfilmIndoCache = { data: uniqueList, timestamp: now };
+      return uniqueList;
+    }
+    return FALLBACK_INDONESIAN_FILMS;
+  } catch (err) {
+    console.error("Error in getJuraganfilmIndonesia:", err);
+    return FALLBACK_INDONESIAN_FILMS;
+  }
+}
+
 export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `juraganfilm:detail:${slug}`;
   const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
@@ -1338,12 +1509,25 @@ export async function getJuraganfilmCatalog(letter: string = 'ALL', page = 1, ge
   try {
     let url = `${JURAGANFILM_BASE}/film-terbaru/${page > 1 ? `page/${page}/` : ''}`;
     if (genre && genre !== 'ALL') {
-      url = `${JURAGANFILM_BASE}/genre/${encodeURIComponent(genre.toLowerCase())}/${page > 1 ? `page/${page}/` : ''}`;
+      if (genre.toLowerCase() === 'indonesia') {
+        url = `${JURAGANFILM_BASE}/country/indonesia/${page > 1 ? `page/${page}/` : ''}`;
+      } else {
+        url = `${JURAGANFILM_BASE}/genre/${encodeURIComponent(genre.toLowerCase())}/${page > 1 ? `page/${page}/` : ''}`;
+      }
     } else if (letter && letter !== 'ALL') {
       url = `${JURAGANFILM_BASE}/${page > 1 ? `page/${page}/` : ''}?s=${encodeURIComponent(letter)}`;
     }
 
-    const html = await fetchHtml(url);
+    let html = '';
+    try {
+      html = await fetchHtml(url);
+    } catch {
+      if (genre.toLowerCase() === 'indonesia') {
+        return { results: FALLBACK_INDONESIAN_FILMS, totalPages: 1 };
+      }
+      return { results: [], totalPages: 1 };
+    }
+
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 

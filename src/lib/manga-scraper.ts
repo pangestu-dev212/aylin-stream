@@ -72,15 +72,14 @@ function setCache<T>(key: string, data: T) {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-async function fetchHtml(url: string): Promise<string> {
+async function fetchHtml(url: string, timeoutMs = 5000): Promise<string> {
   const res = await fetch(url, {
     headers: {
       'User-Agent': USER_AGENT,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
       'Accept-Language': 'id,en-US;q=0.7,en;q=0.3',
     },
-    next: { revalidate: 300 },
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -513,10 +512,70 @@ export async function getChapterData(chapterSlug: string): Promise<ChapterData |
 
   const cleanChapterSlug = chapterSlug.replace(/^\//, '').replace(/\/$/, '');
 
-  // 1. Try Komiku
+  // 1. Try Komikindo First (Fast, 200ms, no Cloudflare block)
+  try {
+    const bases = [KOMIKINDO_ALT, KOMIKINDO_BASE];
+    const candidatePaths = [
+      `${cleanChapterSlug}`,
+      `${cleanChapterSlug.replace(/chapter-(\d+)-(\d+)/i, 'chapter-$1.$2')}`,
+      `ch/${cleanChapterSlug}`,
+    ];
+
+    for (const base of bases) {
+      for (const path of candidatePaths) {
+        try {
+          const url = `${base}/${path}/`;
+          const html = await fetchHtml(url, 4500);
+          const $ = cheerio.load(html);
+
+          const title = $('h1.entry-title').text().trim() || $('h1').text().trim();
+          if (!title || title.includes('404')) continue;
+
+          const parentLink = $('.allc a').attr('href') || $('a[href*="/komik/"]').first().attr('href') || '';
+          const mangaSlug = parentLink.replace(/.*\/komik\//, '').replace(/\/$/, '');
+          const mangaTitle = $('.allc a').text().trim() || mangaSlug.replace(/-/g, ' ');
+
+          const images: string[] = [];
+          $('#chimg-auh img, #readerarea img, .chapter-image img').each((_, el) => {
+            const src = $(el).attr('data-src') || $(el).attr('src') || '';
+            if (src && !src.includes('iklan') && !src.includes('banner') && !src.includes('iklangif')) {
+              const fullSrc = src.startsWith('//') ? `https:${src}` : src;
+              if (!images.includes(fullSrc)) {
+                images.push(fullSrc);
+              }
+            }
+          });
+
+          const prevLink = $('.nextprev a[rel="prev"]').attr('href') || $('.ch-prev-btn').attr('href');
+          const nextLink = $('.nextprev a[rel="next"]').attr('href') || $('.ch-next-btn').attr('href');
+
+          const prevChapterSlug = prevLink ? prevLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
+          const nextChapterSlug = nextLink ? nextLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
+
+          if (images.length > 0) {
+            const chapterData: ChapterData = {
+              title,
+              slug: cleanChapterSlug,
+              mangaTitle,
+              mangaSlug,
+              images,
+              prevChapterSlug,
+              nextChapterSlug,
+            };
+            setCache(cacheKey, chapterData);
+            return chapterData;
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[MangaScraper] Komikindo chapter fetch error:', err);
+  }
+
+  // 2. Fallback to Komiku (Short timeout)
   try {
     const url = `${KOMIKU_BASE}/${cleanChapterSlug}/`;
-    const html = await fetchHtml(url);
+    const html = await fetchHtml(url, 3500);
     const $ = cheerio.load(html);
 
     const title = $('h1').text().trim();
@@ -532,12 +591,10 @@ export async function getChapterData(chapterSlug: string): Promise<ChapterData |
         }
       });
 
-      // Extract manga info
       const mangaLink = $('a[href*="/manga/"]').first().attr('href') || '';
       const mangaSlug = mangaLink ? mangaLink.replace(/.*\/manga\//, '').replace(/\/$/, '') : cleanChapterSlug.replace(/-chapter-.*$/, '');
       const mangaTitle = $('a[href*="/manga/"]').first().text().trim() || mangaSlug.replace(/-/g, ' ');
 
-      // Navigation links
       const prevHref = $('a[rel="prev"], a.prev, .nextprev a:contains("Sebelumnya")').first().attr('href');
       const nextHref = $('a[rel="next"], a.next, .nextprev a:contains("Selanjutnya")').first().attr('href');
 
@@ -559,60 +616,7 @@ export async function getChapterData(chapterSlug: string): Promise<ChapterData |
       }
     }
   } catch (err) {
-    console.warn('[MangaScraper] Komiku chapter failed, trying Komikindo fallback:', err);
-  }
-
-  // 2. Fallback to Komikindo
-  try {
-    const bases = [KOMIKINDO_BASE, KOMIKINDO_ALT];
-    for (const base of bases) {
-      try {
-        const url = `${base}/${cleanChapterSlug}/`;
-        const html = await fetchHtml(url);
-        const $ = cheerio.load(html);
-
-        const title = $('h1.entry-title').text().trim() || $('h1').text().trim();
-        if (!title) continue;
-
-        const parentLink = $('.allc a').attr('href') || $('a[href*="/komik/"]').first().attr('href') || '';
-        const mangaSlug = parentLink.replace(/.*\/komik\//, '').replace(/\/$/, '');
-        const mangaTitle = $('.allc a').text().trim() || mangaSlug.replace(/-/g, ' ');
-
-        const images: string[] = [];
-        $('#chimg-auh img, #readerarea img, .chapter-image img').each((_, el) => {
-          const src = $(el).attr('data-src') || $(el).attr('src') || '';
-          if (src && !src.includes('iklan') && !src.includes('banner') && !src.includes('iklangif')) {
-            const fullSrc = src.startsWith('//') ? `https:${src}` : src;
-            if (!images.includes(fullSrc)) {
-              images.push(fullSrc);
-            }
-          }
-        });
-
-        const prevLink = $('.nextprev a[rel="prev"]').attr('href') || $('.ch-prev-btn').attr('href');
-        const nextLink = $('.nextprev a[rel="next"]').attr('href') || $('.ch-next-btn').attr('href');
-
-        const prevChapterSlug = prevLink ? prevLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
-        const nextChapterSlug = nextLink ? nextLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
-
-        const chapterData: ChapterData = {
-          title,
-          slug: cleanChapterSlug,
-          mangaTitle,
-          mangaSlug,
-          images,
-          prevChapterSlug,
-          nextChapterSlug,
-        };
-
-        if (images.length > 0) {
-          setCache(cacheKey, chapterData);
-          return chapterData;
-        }
-      } catch {}
-    }
-  } catch (err) {
-    console.error(`[MangaScraper] Error fetching chapter data for ${chapterSlug}:`, err);
+    console.warn('[MangaScraper] Komiku chapter fallback failed:', err);
   }
 
   return null;

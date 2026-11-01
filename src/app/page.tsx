@@ -1,4 +1,4 @@
-import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getAnimeXinOngoing, getJuraganfilmOngoing, getJikanOngoingAnime } from '@/lib/stream-scraper';
+import { getSamehadakuOngoing, getOtakudesuOngoing, getAnichinOngoing, getAnimeXinOngoing, getJuraganfilmOngoing, getJuraganfilmIndonesia, getJikanOngoingAnime } from '@/lib/stream-scraper';
 import { getLatestManga } from '@/lib/manga-scraper';
 import { getShortDramaPopular } from '@/lib/shortdrama-scraper';
 import { filterSafeList } from '@/lib/content-filter';
@@ -9,12 +9,13 @@ export const revalidate = 180;
 
 export default async function Home() {
   // Fetch all live data sources in parallel
-  const [rawSamehadaku, rawOtakudesu, rawAnichin, rawAnimeXin, rawDrama, rawJikan, rawManga, rawShortDrama] = await Promise.all([
+  const [rawSamehadaku, rawOtakudesu, rawAnichin, rawAnimeXin, rawDrama, rawIndo, rawJikan, rawManga, rawShortDrama] = await Promise.all([
     getSamehadakuOngoing().catch(() => []),
     getOtakudesuOngoing().catch(() => []),
     getAnichinOngoing().catch(() => []),
     getAnimeXinOngoing().catch(() => []),
     getJuraganfilmOngoing().catch(() => []),
+    getJuraganfilmIndonesia().catch(() => []),
     getJikanOngoingAnime().catch(() => []),
     getLatestManga().catch(() => []),
     getShortDramaPopular().catch(() => [])
@@ -36,8 +37,8 @@ export default async function Home() {
   const ongoingAnime = filterSafeList([...new Map(rawAnime.map(item => [item.slug, item])).values()]);
   const ongoingDonghua = filterSafeList([...new Map(rawDonghua.map(item => [item.slug, item])).values()]);
   
-  // Map type to 'drama' so client layout handles styling appropriately
-  const parsedDrama = rawDrama.map(item => ({ ...item, type: 'drama' as const }));
+  // Merge Asian Drama + Indonesian Movies
+  const parsedDrama = [...rawIndo, ...rawDrama].map(item => ({ ...item, type: 'drama' as const }));
   const ongoingDrama = filterSafeList([...new Map(parsedDrama.map(item => [item.slug, item])).values()]);
   const ongoingManga = filterSafeList([...new Map(rawManga.map(item => [item.slug, item])).values()]);
   const ongoingShortDrama = filterSafeList(rawShortDrama);
