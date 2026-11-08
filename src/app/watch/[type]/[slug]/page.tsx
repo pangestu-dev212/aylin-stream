@@ -8,6 +8,8 @@ import {
   getSamehadakuDetail,
   getSamehadakuSearch,
   getDonghuastreamDetail,
+  getGojonimeDetail,
+  getGojonimeSearch,
   getAniListTitleInfo
 } from '@/lib/stream-scraper';
 import WatchClient from './WatchClient';
@@ -72,6 +74,10 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
     const dSame = await getSamehadakuDetail(directSlug).catch(() => null);
     if (dSame && dSame.episodes && dSame.episodes.length > 0) {
       return { data: dSame, resolvedSource: 'samehadaku' };
+    }
+    const dGojo = await getGojonimeDetail(directSlug).catch(() => null);
+    if (dGojo && dGojo.episodes && dGojo.episodes.length > 0) {
+      return { data: dGojo, resolvedSource: 'gojonime' };
     }
   }
 
@@ -191,6 +197,18 @@ async function searchAnimeFallback(slug: string): Promise<{ data: any; resolvedS
         }
       }
     }
+
+    // 3. Try Gojonime fallback (especially for retro / completed / long-running anime)
+    for (const query of queries) {
+      const results = await getGojonimeSearch(query).catch(() => []);
+      const sorted = getSortedCandidates(results);
+      for (const cand of sorted) {
+        const d = await getGojonimeDetail(cand.slug).catch(() => null);
+        if (d && d.episodes && d.episodes.length > 0) {
+          return { data: d, resolvedSource: 'gojonime' };
+        }
+      }
+    }
   }
 
   return null;
@@ -218,6 +236,17 @@ async function fetchDetail(type: string, slug: string, source?: string) {
     if (d && d.episodes && d.episodes.length > 0) return { data: d, resolvedSource: 'samehadaku' };
     const d2 = await getOtakudesuDetail(slug).catch(() => null);
     if (d2 && d2.episodes && d2.episodes.length > 0) return { data: d2, resolvedSource: 'otakudesu' };
+    const d3 = await getGojonimeDetail(slug).catch(() => null);
+    if (d3 && d3.episodes && d3.episodes.length > 0) return { data: d3, resolvedSource: 'gojonime' };
+    const fallback = await searchAnimeFallback(slug);
+    if (fallback) return fallback;
+  } else if (source === 'gojonime') {
+    const d = await getGojonimeDetail(slug).catch(() => null);
+    if (d && d.episodes && d.episodes.length > 0) return { data: d, resolvedSource: 'gojonime' };
+    const dSame = await getSamehadakuDetail(slug).catch(() => null);
+    if (dSame && dSame.episodes && dSame.episodes.length > 0) return { data: dSame, resolvedSource: 'samehadaku' };
+    const dOtaku = await getOtakudesuDetail(slug).catch(() => null);
+    if (dOtaku && dOtaku.episodes && dOtaku.episodes.length > 0) return { data: dOtaku, resolvedSource: 'otakudesu' };
     const fallback = await searchAnimeFallback(slug);
     if (fallback) return fallback;
   } else if (source === 'animexin') {
@@ -245,11 +274,13 @@ async function fetchDetail(type: string, slug: string, source?: string) {
     const alt2 = await getDonghuastreamDetail(slug).catch(() => null);
     if (alt2) return { data: alt2, resolvedSource: 'donghuastream' };
   } else {
-    // anime default: try Samehadaku direct & Otakudesu direct
+    // anime default: try Samehadaku direct, Otakudesu direct, & Gojonime direct
     const dSame = await getSamehadakuDetail(slug).catch(() => null);
     if (dSame && dSame.episodes && dSame.episodes.length > 0) return { data: dSame, resolvedSource: 'samehadaku' };
     const dOtaku = await getOtakudesuDetail(slug).catch(() => null);
     if (dOtaku && dOtaku.episodes && dOtaku.episodes.length > 0) return { data: dOtaku, resolvedSource: 'otakudesu' };
+    const dGojo = await getGojonimeDetail(slug).catch(() => null);
+    if (dGojo && dGojo.episodes && dGojo.episodes.length > 0) return { data: dGojo, resolvedSource: 'gojonime' };
     // Cross-search fallback
     const fallback = await searchAnimeFallback(slug);
     if (fallback) return fallback;

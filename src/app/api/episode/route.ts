@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOtakudesuEpisode, getAnichinEpisode, getJuraganfilmEpisode, getSamehadakuEpisode, getAnimeXinEpisode, getDonghuastreamEpisode, resolveOtakudesuMirror } from '@/lib/stream-scraper';
+import { 
+  getOtakudesuEpisode, 
+  getAnichinEpisode, 
+  getJuraganfilmEpisode, 
+  getSamehadakuEpisode, 
+  getAnimeXinEpisode, 
+  getDonghuastreamEpisode, 
+  getGojonimeEpisode,
+  resolveOtakudesuMirror 
+} from '@/lib/stream-scraper';
 
 export async function GET(req: NextRequest) {
   try {
@@ -29,8 +38,14 @@ export async function GET(req: NextRequest) {
     if (source === 'otakudesu') {
       data = await getOtakudesuEpisode(slug);
       if (!data) data = await getSamehadakuEpisode(slug);
+      if (!data) data = await getGojonimeEpisode(slug);
     } else if (source === 'samehadaku') {
       data = await getSamehadakuEpisode(slug);
+      if (!data) data = await getOtakudesuEpisode(slug);
+      if (!data) data = await getGojonimeEpisode(slug);
+    } else if (source === 'gojonime') {
+      data = await getGojonimeEpisode(slug);
+      if (!data) data = await getSamehadakuEpisode(slug);
       if (!data) data = await getOtakudesuEpisode(slug);
     } else if (source === 'animexin') {
       data = await getAnimeXinEpisode(slug);
@@ -44,6 +59,7 @@ export async function GET(req: NextRequest) {
     } else {
       data = await getOtakudesuEpisode(slug);
       if (!data) data = await getSamehadakuEpisode(slug);
+      if (!data) data = await getGojonimeEpisode(slug);
     }
 
     if (!data) {

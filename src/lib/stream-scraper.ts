@@ -277,6 +277,7 @@ export interface AnimeDetail {
   details: string[];
   episodes: EpisodeLink[];
   type: 'anime' | 'donghua' | 'drama';
+  source?: string;
 }
 
 export interface EpisodeLink {
@@ -1198,8 +1199,12 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
                 $('.gmr-poster-wrapper img').attr('data-src') || 
                 '';
     
-    // Synopsis
-    const synopsis = $('.entry-content p').text().trim() || 'Tidak ada sinopsis.';
+    // Synopsis - strip any broken third-party shortcodes (e.g. [tcos][tab title="Streamango"]...)
+    const rawSynopsis = $('.entry-content p').text().trim() || $('.entry-content').text().trim() || 'Tidak ada sinopsis.';
+    const synopsis = rawSynopsis
+      .replace(/\[\/?(?:tcos|tab|stgo|vload|embed|shortcode)[^\]]*\]/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim() || 'Tidak ada sinopsis.';
 
     // Details/Meta
     const details: string[] = [];
@@ -1402,8 +1407,9 @@ export async function getJuraganfilmSearch(query: string): Promise<AnimeCard[]> 
   }
 }
 
-export async function getOtakudesuCatalog(letter: string): Promise<AnimeCard[]> {
-  const cacheKey = `otakudesu:catalog:${letter}`;
+export async function getOtakudesuCatalog(letter: string = 'ALL'): Promise<AnimeCard[]> {
+  const safeLetter = letter || 'ALL';
+  const cacheKey = `otakudesu:catalog:${safeLetter}`;
   const cached = getFromCache<AnimeCard[]>(cacheKey, 6 * 60 * 60 * 1000); // 6 hours
   if (cached) return cached;
 
@@ -1422,12 +1428,12 @@ export async function getOtakudesuCatalog(letter: string): Promise<AnimeCard[]> 
 
         const firstChar = title.trim().charAt(0).toUpperCase();
         let match = false;
-        if (letter === 'ALL') {
+        if (safeLetter === 'ALL') {
           match = true;
-        } else if (letter === '#') {
+        } else if (safeLetter === '#') {
           match = /[^A-Z]/.test(firstChar);
         } else {
-          match = firstChar === letter.toUpperCase();
+          match = firstChar === safeLetter.toUpperCase();
         }
 
         if (match && slug) {
@@ -1735,7 +1741,7 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
 
 export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `samehadaku:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
+  const cached = getFromCache<AnimeDetail>(cacheKey, 3 * 60 * 1000); // 3 minutes for ongoing updates
   if (cached) return cached;
 
   try {
@@ -1797,21 +1803,50 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
 
     const episodes: EpisodeLink[] = [];
     
-    // Extract all episodes (Samehadaku uses a[href*="-episode-"], a[href*="/nonton/"], or .episodelist a, .lchx a)
-    $('a[href*="-episode-"], a[href*="/nonton/"], .episodelist a, .lchx a').each((i, el) => {
+    // Extract all episodes (Samehadaku uses a[href*="-episode-"], a[href*="/nonton/"], a[href*="-bluray"], a[href*="-subindo"], .episodelist a, .lchx a, etc.)
+    $('a[href*="-episode-"], a[href*="/nonton/"], a[href*="-bluray"], a[href*="-subindo"], .episodelist a, .lchx a, div[class*="rounded"] a').each((i, el) => {
       const epUrl = $(el).attr('href') || '';
       const epText = $(el).text().trim();
+      if (!epUrl.startsWith(SAMEHADAKU_BASE) && !epUrl.startsWith('/')) return;
+      if (epUrl.includes('/anime/') || epUrl.includes('/genre/') || epUrl.includes('/daftar-') || epUrl.includes('/tag/') || epUrl.includes('/batch/') || epUrl.includes('/login/') || epUrl.includes('/bookmark/')) return;
+      
       const epSlug = extractSlug(epUrl);
-      if (epSlug && !epSlug.includes('/anime/') && !episodes.some(e => e.slug === epSlug)) {
+      if (epSlug && epSlug !== seriesSlug) {
         const epMatch = epText.match(/Episode\s+\d+/i);
-        const displayTitle = epMatch ? epMatch[0] : (epText || `Episode`);
-        episodes.push({ title: displayTitle, slug: epSlug });
+        const slugMatch = epSlug.match(/[-_]episode[-_](\d+)/i) || epSlug.match(/[-_]ep[-_](\d+)/i);
+        const numMatch = epText.match(/^\d+$/);
+
+        let displayTitle = '';
+        if (epMatch) {
+          displayTitle = epMatch[0];
+        } else if (slugMatch) {
+          displayTitle = `Episode ${slugMatch[1]}`;
+        } else if (numMatch) {
+          displayTitle = `Episode ${numMatch[0]}`;
+        } else if (epText && !/^(?:tonton|episode)$/i.test(epText.trim())) {
+          displayTitle = epText.trim();
+        } else {
+          displayTitle = 'Episode';
+        }
+
+        const existing = episodes.find(e => e.slug === epSlug);
+        if (existing) {
+          if (/\d+/.test(displayTitle) && !/\d+/.test(existing.title)) {
+            existing.title = displayTitle;
+          }
+        } else {
+          episodes.push({ title: displayTitle, slug: epSlug });
+        }
       }
     });
 
-    // If no episodes were found, this is not a valid series page
+    // Fallback for single Movie/OVA pages if no separate episode list was found
     if (episodes.length === 0) {
-      return null;
+      if (title.toLowerCase().includes('movie') || seriesSlug.includes('movie')) {
+        episodes.push({ title: 'Full Movie', slug: seriesSlug });
+      } else {
+        return null;
+      }
     }
 
     const result: AnimeDetail = { title, slug: seriesSlug, img, synopsis, details, episodes, type: 'anime' };
@@ -1909,6 +1944,19 @@ export async function getSamehadakuEpisode(slug: string) {
         playerText: 'Web Player (Embed)',
         payload: { src: normalizedDefault }
       });
+    }
+
+    // 2b. Script player embeds (e.g. file.fm embedded scripts)
+    const fileFmScript = $('script[src*="file.fm"]').attr('src') || '';
+    if (fileFmScript) {
+      const hashMatch = fileFmScript.match(/hash=([a-zA-Z0-9]+)/);
+      if (hashMatch) {
+        mirrors.push({
+          quality: 'HD',
+          playerText: 'FilesFM Player',
+          payload: { src: `https://files.fm/f/${hashMatch[1]}` }
+        });
+      }
     }
 
     // 3. Samehadaku .east_player_option elements (ajax mirrors)
@@ -2444,6 +2492,200 @@ export async function getDonghuastreamSearch(query: string): Promise<AnimeCard[]
   } catch (err) {
     console.error("Error in getDonghuastreamSearch:", err);
     return [];
+  }
+}
+
+// ==========================================
+// GOJONIME SCRAPER
+// ==========================================
+
+const GOJONIME_BASE = 'https://gojonime.net';
+
+export async function getGojonimeSearch(query: string): Promise<AnimeCard[]> {
+  const cacheKey = `gojonime:search:${query}`;
+  const cached = getFromCache<AnimeCard[]>(cacheKey, 60 * 1000);
+  if (cached) return cached;
+
+  try {
+    const url = `${GOJONIME_BASE}/?s=${encodeURIComponent(query)}`;
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+    const results: AnimeCard[] = [];
+    const seenSlugs = new Set<string>();
+
+    $('article, .bsx, .animposx').each((i, el) => {
+      const a = $(el).find('a').first();
+      const href = a.attr('href') || '';
+      const h2Text = $(el).find('h2').first().text().trim();
+      const ttText = $(el).find('.tt').clone().children().remove().end().text().trim();
+      const title = h2Text || ttText || a.attr('title') || '';
+      const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
+      const slug = extractSlug(href);
+      const ep = $(el).find('.epx, .bt .ep, .status').first().text().trim();
+
+      if (title && slug && href.includes('/anime/') && !seenSlugs.has(slug)) {
+        seenSlugs.add(slug);
+        results.push({
+          title,
+          slug,
+          url: normalizeUrl(href, GOJONIME_BASE),
+          img: normalizeUrl(img, GOJONIME_BASE),
+          ep: ep || '',
+          type: 'anime',
+          source: 'gojonime'
+        });
+      }
+    });
+
+    setInCache(cacheKey, results);
+    return results;
+  } catch (err) {
+    console.error("Error in getGojonimeSearch:", err);
+    return [];
+  }
+}
+
+export async function getGojonimeDetail(slug: string): Promise<AnimeDetail | null> {
+  const cacheKey = `gojonime:detail:${slug}`;
+  const cached = getFromCache<AnimeDetail>(cacheKey, 60 * 60 * 1000);
+  if (cached) return cached;
+
+  try {
+    const candidateUrls = [
+      `${GOJONIME_BASE}/anime/${slug}/`,
+      `${GOJONIME_BASE}/${slug}/`
+    ];
+
+    let html = '';
+    let $ = null;
+    for (const testUrl of candidateUrls) {
+      try {
+        const fetched = await fetchHtml(testUrl);
+        const $test = cheerio.load(fetched);
+        const t = $test('.entry-title, h1').first().text().trim();
+        if (t && !t.toLowerCase().includes('page not found') && !t.toLowerCase().includes('404')) {
+          html = fetched;
+          $ = $test;
+          break;
+        }
+      } catch {}
+    }
+
+    if (!$ || !html) return null;
+
+    const rawTitle = $('.entry-title, h1').first().text().trim();
+    const title = rawTitle.replace(/Sub\s+Indo/i, '').trim();
+    const img = $('img.wp-post-image, .thumb img').attr('src') || $('img').first().attr('src') || '';
+    const synopsis = $('.entry-content p, .sinopsis, .desc').text().trim() || 'Tidak ada sinopsis.';
+
+    const details: string[] = [];
+    $('.spe span, .info-content span').each((i, el) => {
+      details.push($(el).text().trim());
+    });
+
+    const episodes: EpisodeLink[] = [];
+    $('ul.episodelist li, .eplister ul li').each((i, el) => {
+      const a = $(el).find('a').first();
+      const epUrl = a.attr('href') || '';
+      const epSlug = extractSlug(epUrl);
+      const epNum = $(el).find('.epl-num').text().trim();
+      const epTitleText = $(el).find('.epl-title').text().trim() || a.text().trim();
+      const epMatch = epTitleText.match(/Episode\s+\d+/i);
+      const displayTitle = epMatch ? epMatch[0] : (epNum ? `Episode ${epNum}` : epTitleText);
+
+      if (epSlug && !episodes.some(e => e.slug === epSlug)) {
+        episodes.push({
+          title: displayTitle,
+          slug: epSlug
+        });
+      }
+    });
+
+    // Invert to chronological order (Episode 1 first)
+    if (episodes.length > 0) {
+      episodes.reverse();
+    } else if (title.toLowerCase().includes('movie') || slug.includes('movie')) {
+      episodes.push({ title: 'Full Movie', slug });
+    } else {
+      return null;
+    }
+
+    const result: AnimeDetail = {
+      title,
+      slug,
+      img: normalizeUrl(img, GOJONIME_BASE),
+      synopsis,
+      details,
+      episodes,
+      type: 'anime',
+      source: 'gojonime'
+    };
+
+    setInCache(cacheKey, result);
+    return result;
+  } catch (err) {
+    console.error(`Error in getGojonimeDetail for ${slug}:`, err);
+    return null;
+  }
+}
+
+export async function getGojonimeEpisode(slug: string) {
+  const cacheKey = `gojonime:episode:${slug}`;
+  const cached = getFromCache<any>(cacheKey, 60 * 60 * 1000);
+  if (cached) return cached;
+
+  try {
+    const url = `${GOJONIME_BASE}/${slug}/`;
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+
+    const title = $('.entry-title, h1').first().text().trim();
+    const mirrors: any[] = [];
+
+    // Parse select options with base64 encoded iframe
+    $('select option').each((i, el) => {
+      const text = $(el).text().trim();
+      const val = $(el).attr('value') || '';
+      if (val && val.length > 20) {
+        try {
+          const decoded = Buffer.from(val, 'base64').toString('utf8');
+          const $iframe = cheerio.load(decoded);
+          let src = $iframe('iframe').attr('src') || '';
+          if (src) {
+            if (src.startsWith('//')) src = 'https:' + src;
+            mirrors.push({
+              quality: text.includes('HD') ? 'HD' : 'SD',
+              playerText: text || `Server ${i + 1}`,
+              payload: { src }
+            });
+          }
+        } catch {}
+      }
+    });
+
+    // Fallback to page iframe
+    const pageIframe = $('iframe').attr('src') || $('iframe').attr('data-src') || '';
+    if (pageIframe && !mirrors.some(m => m.payload?.src === pageIframe)) {
+      mirrors.unshift({
+        quality: 'HD',
+        playerText: 'Web Player',
+        payload: { src: pageIframe }
+      });
+    }
+
+    // Sort mirrors so working direct player (e.g. Blogger embed) is prioritized
+    mirrors.sort((a, b) => {
+      const aIsBlogger = a.payload?.src?.includes('blogger.com') ? 1 : 0;
+      const bIsBlogger = b.payload?.src?.includes('blogger.com') ? 1 : 0;
+      return bIsBlogger - aIsBlogger;
+    });
+
+    const result = { title, slug, mirrors };
+    setInCache(cacheKey, result);
+    return result;
+  } catch (err) {
+    console.error(`Error in getGojonimeEpisode for ${slug}:`, err);
+    return null;
   }
 }
 

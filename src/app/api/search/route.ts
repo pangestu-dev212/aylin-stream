@@ -5,7 +5,8 @@ import {
   getJuraganfilmSearch, 
   getSamehadakuSearch, 
   getAnimeXinSearch, 
-  getDonghuastreamSearch 
+  getDonghuastreamSearch,
+  getGojonimeSearch
 } from '@/lib/stream-scraper';
 import { searchManga } from '@/lib/manga-scraper';
 import { searchShortDrama } from '@/lib/shortdrama-scraper';
@@ -24,6 +25,10 @@ export async function GET(req: NextRequest) {
     // Direct single source search
     if (source === 'samehadaku') {
       const results = await getSamehadakuSearch(query).catch(() => []);
+      return NextResponse.json({ success: true, results: filterSafeList(results) });
+    }
+    if (source === 'gojonime') {
+      const results = await getGojonimeSearch(query).catch(() => []);
       return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'animexin') {
@@ -49,6 +54,7 @@ export async function GET(req: NextRequest) {
     const [
       otakuResults,
       sameResults,
+      gojonimeResults,
       anichinResults,
       animexinResults,
       donghuaStreamResults,
@@ -58,6 +64,7 @@ export async function GET(req: NextRequest) {
     ] = await Promise.all([
       getOtakudesuSearch(query).catch(() => []),
       getSamehadakuSearch(query).catch(() => []),
+      getGojonimeSearch(query).catch(() => []),
       getAnichinSearch(query).catch(() => []),
       getAnimeXinSearch(query).catch(() => []),
       getDonghuastreamSearch(query).catch(() => []),
@@ -67,11 +74,12 @@ export async function GET(req: NextRequest) {
     ]);
 
     const mappedOtaku = otakuResults.map(i => ({ ...i, type: 'anime' as const, source: 'otakudesu' }));
-    const mappedAnichin = anichinResults.map(i => ({ ...i, type: 'donghua' as const, source: 'anichin' }));
-    const mappedDrama = dramaResults.map(item => ({ ...item, type: 'drama' as const, source: 'juraganfilm' }));
     const mappedSame = sameResults.map(i => ({ ...i, type: 'anime' as const, source: 'samehadaku' }));
+    const mappedGojonime = gojonimeResults.map(i => ({ ...i, type: 'anime' as const, source: 'gojonime' }));
+    const mappedAnichin = anichinResults.map(i => ({ ...i, type: 'donghua' as const, source: 'anichin' }));
     const mappedAnimexin = animexinResults.map(i => ({ ...i, type: 'donghua' as const, source: 'animexin' }));
     const mappedDonghuastream = donghuaStreamResults.map(i => ({ ...i, type: 'donghua' as const, source: 'donghuastream' }));
+    const mappedDrama = dramaResults.map(item => ({ ...item, type: 'drama' as const, source: 'juraganfilm' }));
     const mappedManga = mangaResults.map(item => ({ 
       title: item.title, 
       slug: item.slug, 
@@ -89,16 +97,17 @@ export async function GET(req: NextRequest) {
       type: 'shortdrama' as const,
     }));
 
-    // Concatenate, placing primary sources first so they are preferred during deduplication
+    // Concatenate, placing anime sources first
     const combinedRaw = [
       ...mappedOtaku,
+      ...mappedSame,
+      ...mappedGojonime,
       ...mappedAnichin,
+      ...mappedAnimexin,
+      ...mappedDonghuastream,
       ...mappedDrama,
       ...mappedShortDrama,
-      ...mappedManga,
-      ...mappedSame,
-      ...mappedAnimexin,
-      ...mappedDonghuastream
+      ...mappedManga
     ];
 
     // Deduplicate by normalized title

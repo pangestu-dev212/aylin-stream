@@ -8,6 +8,8 @@ import {
   getAnimeXinDetail, 
   getDonghuastreamDetail, 
   getJuraganfilmDetail,
+  getGojonimeDetail,
+  getGojonimeSearch,
   getAniListTitleInfo 
 } from '@/lib/stream-scraper';
 
@@ -58,6 +60,9 @@ async function smartAnimeSearch(originalSlug: string): Promise<any | null> {
 
     const dSame = await getSamehadakuDetail(directSlug).catch(() => null);
     if (dSame && dSame.episodes && dSame.episodes.length > 0) return dSame;
+
+    const dGojo = await getGojonimeDetail(directSlug).catch(() => null);
+    if (dGojo && dGojo.episodes && dGojo.episodes.length > 0) return dGojo;
   }
 
   const searchTitles: string[] = [];
@@ -170,6 +175,16 @@ async function smartAnimeSearch(originalSlug: string): Promise<any | null> {
         if (d && d.episodes && d.episodes.length > 0) return d;
       }
     }
+
+    // 3. Gojonime fallback (for retro/classics like Dragon Ball, GT, Super)
+    for (const query of queries) {
+      const results = await getGojonimeSearch(query).catch(() => []);
+      const sorted = getSortedCandidates(results);
+      for (const cand of sorted) {
+        const d = await getGojonimeDetail(cand.slug).catch(() => null);
+        if (d && d.episodes && d.episodes.length > 0) return d;
+      }
+    }
   }
 
   return null;
@@ -208,11 +223,20 @@ export async function GET(
     if (source === 'otakudesu') {
       data = await getOtakudesuDetail(slug).catch(() => null);
       if (!data) data = await getSamehadakuDetail(slug).catch(() => null);
+      if (!data) data = await getGojonimeDetail(slug).catch(() => null);
       if (!data) {
         data = await smartAnimeSearch(slug);
       }
     } else if (source === 'samehadaku') {
       data = await getSamehadakuDetail(slug).catch(() => null);
+      if (!data) data = await getOtakudesuDetail(slug).catch(() => null);
+      if (!data) data = await getGojonimeDetail(slug).catch(() => null);
+      if (!data) {
+        data = await smartAnimeSearch(slug);
+      }
+    } else if (source === 'gojonime') {
+      data = await getGojonimeDetail(slug).catch(() => null);
+      if (!data) data = await getSamehadakuDetail(slug).catch(() => null);
       if (!data) data = await getOtakudesuDetail(slug).catch(() => null);
       if (!data) {
         data = await smartAnimeSearch(slug);
@@ -229,6 +253,7 @@ export async function GET(
     } else {
       data = await getSamehadakuDetail(slug).catch(() => null);
       if (!data) data = await getOtakudesuDetail(slug).catch(() => null);
+      if (!data) data = await getGojonimeDetail(slug).catch(() => null);
       if (!data) {
         data = await smartAnimeSearch(slug);
       }

@@ -46,7 +46,7 @@ interface WatchClientProps {
   initialSource?: string;
 }
 
-function getCleanEpisodeNumber(title: string, fallbackNum: number): string {
+function getCleanEpisodeNumber(title: string, fallbackNum: number, slug?: string): string {
   // Try matching range first, e.g. "Episode 951 – 975" -> "951-975"
   const rangeMatch = title.match(/Episode\s+(\d+)\s*–\s*(\d+)/i);
   if (rangeMatch) return `Ep ${rangeMatch[1]}-${rangeMatch[2]}`;
@@ -59,6 +59,16 @@ function getCleanEpisodeNumber(title: string, fallbackNum: number): string {
   const epMatch = title.match(/Ep\s+(\d+)/i);
   if (epMatch) return `Ep ${epMatch[1]}`;
 
+  // Try matching pure number like "5" or "6"
+  const pureNumMatch = title.trim().match(/^(\d+)$/);
+  if (pureNumMatch) return `Ep ${pureNumMatch[1]}`;
+
+  // Try matching episode number from slug, e.g. "black-clover-season-2-episode-6" -> "Ep 6"
+  if (slug) {
+    const slugMatch = slug.match(/[-_]episode[-_](\d+)/i) || slug.match(/[-_]ep[-_](\d+)/i);
+    if (slugMatch) return `Ep ${slugMatch[1]}`;
+  }
+
   // Fallback to title cleanup (removing common boilerplate)
   const cleaned = title
     .replace(/Subtitle Indonesia/i, '')
@@ -66,7 +76,12 @@ function getCleanEpisodeNumber(title: string, fallbackNum: number): string {
     .replace(/One Piece/i, '')
     .trim();
 
-  if (cleaned.length > 0 && cleaned.length < 15) return cleaned;
+  // If cleaned is generic "Episode" or "Tonton" with no digits, use fallbackNum!
+  if (/^(?:episode|tonton)$/i.test(cleaned)) {
+    return `Ep ${fallbackNum}`;
+  }
+
+  if (cleaned.length > 0 && cleaned.length < 15 && /\d/.test(cleaned)) return cleaned;
 
   return `Ep ${fallbackNum}`;
 }
@@ -1789,7 +1804,7 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                     {watchedEpisodes.includes(ep.slug) && activeEpisode?.slug !== ep.slug && (
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0 animate-pulse" />
                     )}
-                    {getCleanEpisodeNumber(ep.title, data.episodes.length - idx)}
+                    {getCleanEpisodeNumber(ep.title, data.episodes.length - idx, ep.slug)}
                   </button>
                 ))}
               </div>
