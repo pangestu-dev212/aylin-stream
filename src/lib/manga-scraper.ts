@@ -1,10 +1,56 @@
 import * as cheerio from 'cheerio';
 import { isContentSafe, isSafeQuery, filterSafeList, isNsfwText } from '@/lib/content-filter';
+import { cleanSynopsis } from '@/lib/stream-scraper';
 
-const KOMIKU_BASE = 'https://komiku.org';
-const KOMIKINDO_BASE = 'https://komikindo.org';
-const KOMIKINDO_ALT = 'https://komikindo.ch';
+export const KOMIKU_BASES = ['https://komiku.org', 'https://komiku.id', 'https://komiku.co.id'];
+export const KOMIKINDO_BASES = ['https://komikindo.ch', 'https://komikindo.org', 'https://komikindo.tv', 'https://komikindo.moe'];
+
+export let KOMIKU_BASE = KOMIKU_BASES[0];
+export let KOMIKINDO_BASE = KOMIKINDO_BASES[0];
+export const KOMIKINDO_ALT = KOMIKINDO_BASES[1];
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+export async function fetchFromKomikindo(pathBuilder: string | ((base: string) => string)): Promise<{ html: string; base: string }> {
+  const currentBase = KOMIKINDO_BASE;
+  const orderedBases = [currentBase, ...KOMIKINDO_BASES.filter(b => b !== currentBase)];
+  let lastErr: any = null;
+  for (const base of orderedBases) {
+    try {
+      const url = typeof pathBuilder === 'function' ? pathBuilder(base) : `${base}${pathBuilder.startsWith('/') ? '' : '/'}${pathBuilder}`;
+      const html = await fetchHtml(url);
+      if (html && html.length > 200) {
+        if (base !== currentBase) {
+          KOMIKINDO_BASE = base;
+        }
+        return { html, base };
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('All Komikindo mirror domains failed');
+}
+
+export async function fetchFromKomiku(pathBuilder: string | ((base: string) => string)): Promise<{ html: string; base: string }> {
+  const currentBase = KOMIKU_BASE;
+  const orderedBases = [currentBase, ...KOMIKU_BASES.filter(b => b !== currentBase)];
+  let lastErr: any = null;
+  for (const base of orderedBases) {
+    try {
+      const url = typeof pathBuilder === 'function' ? pathBuilder(base) : `${base}${pathBuilder.startsWith('/') ? '' : '/'}${pathBuilder}`;
+      const html = await fetchHtml(url);
+      if (html && html.length > 200) {
+        if (base !== currentBase) {
+          KOMIKU_BASE = base;
+        }
+        return { html, base };
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('All Komiku mirror domains failed');
+}
 
 export interface MangaCard {
   title: string;
@@ -100,53 +146,45 @@ export async function getLatestManga(page: number = 1): Promise<MangaCard[]> {
 
   // 1. Try Komikindo First (Fast, active, no Cloudflare block)
   try {
-    const fallbackBases = [KOMIKINDO_ALT, KOMIKINDO_BASE];
-    for (const base of fallbackBases) {
-      try {
-        const url = page === 1 ? `${base}/komik-terbaru/` : `${base}/komik-terbaru/page/${page}/`;
-        const html = await fetchHtml(url);
-        const $ = cheerio.load(html);
+    const { html } = await fetchFromKomikindo(b => page === 1 ? `${b}/komik-terbaru/` : `${b}/komik-terbaru/page/${page}/`);
+    const $ = cheerio.load(html);
 
-        $('.animepost').each((_, el) => {
-          const link = $(el).find('a').attr('href') || '';
-          if (!link || link.includes('/konten/ecchi') || link.includes('/konten/hentai')) return;
+    $('.animepost').each((_, el) => {
+      const link = $(el).find('a').attr('href') || '';
+      if (!link || link.includes('/konten/ecchi') || link.includes('/konten/hentai')) return;
 
-          const rawTitle = $(el).find('.tt h3 a, a[rel="bookmark"], .tt h4, h4').first().text().trim();
-          const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
-          if (!title) return;
+      const rawTitle = $(el).find('.tt h3 a, a[rel="bookmark"], .tt h4, h4').first().text().trim();
+      const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
+      if (!title) return;
 
-          const img = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || '';
-          const slug = link.replace(/.*\/komik\//, '').replace(/\/$/, '');
+      const img = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || '';
+      const slug = link.replace(/.*\/komik\//, '').replace(/\/$/, '');
 
-          if (!isContentSafe({ title, slug })) return;
+      if (!isContentSafe({ title, slug })) return;
 
-          const typeFlagClass = $(el).find('.typeflag').attr('class') || '';
-          let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
-          if (typeFlagClass.toLowerCase().includes('manhwa')) type = 'manhwa';
-          else if (typeFlagClass.toLowerCase().includes('manhua')) type = 'manhua';
+      const typeFlagClass = $(el).find('.typeflag').attr('class') || '';
+      let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
+      if (typeFlagClass.toLowerCase().includes('manhwa')) type = 'manhwa';
+      else if (typeFlagClass.toLowerCase().includes('manhua')) type = 'manhua';
 
-          const isColored = type === 'manhwa' || type === 'manhua' || $(el).text().toLowerCase().includes('warna');
-          const latestChapterEl = $(el).find('.lsch a');
-          const latestChapter = latestChapterEl.text().trim();
-          const chapterUrl = latestChapterEl.attr('href') || '';
-          const chapterSlug = chapterUrl ? chapterUrl.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : undefined;
+      const isColored = type === 'manhwa' || type === 'manhua' || $(el).text().toLowerCase().includes('warna');
+      const latestChapterEl = $(el).find('.lsch a');
+      const latestChapter = latestChapterEl.text().trim();
+      const chapterUrl = latestChapterEl.attr('href') || '';
+      const chapterSlug = chapterUrl ? chapterUrl.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : undefined;
 
-          items.push({
-            title,
-            slug,
-            url: link,
-            img,
-            latestChapter,
-            chapterUrl,
-            chapterSlug,
-            type,
-            isColored,
-          });
-        });
-
-        if (items.length > 0) break;
-      } catch {}
-    }
+      items.push({
+        title,
+        slug,
+        url: link,
+        img,
+        latestChapter,
+        chapterUrl,
+        chapterSlug,
+        type,
+        isColored,
+      });
+    });
 
     const safeItems = filterSafeList(items);
     if (safeItems.length > 0) {
@@ -273,53 +311,47 @@ export async function searchManga(query: string): Promise<MangaCard[]> {
   }
 
   // 2. Query Komikindo search
-  const bases = [KOMIKINDO_ALT, KOMIKINDO_BASE];
-  for (const base of bases) {
-    try {
-      const url = `${base}/?s=${encodeURIComponent(cleanQ)}`;
-      const html = await fetchHtml(url);
-      const $ = cheerio.load(html);
+  try {
+    const { html } = await fetchFromKomikindo(b => `${b}/?s=${encodeURIComponent(cleanQ)}`);
+    const $ = cheerio.load(html);
 
-      $('.animepost').each((_, el) => {
-        const link = $(el).find('a').attr('href') || '';
-        if (!link || link.includes('/konten/ecchi') || link.includes('/konten/hentai')) return;
+    $('.animepost').each((_, el) => {
+      const link = $(el).find('a').attr('href') || '';
+      if (!link || link.includes('/konten/ecchi') || link.includes('/konten/hentai')) return;
 
-        const rawTitle = $(el).find('.tt h3 a, a[rel="bookmark"], .tt h4, h4').first().text().trim();
-        const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
-        if (!title) return;
+      const rawTitle = $(el).find('.tt h3 a, a[rel="bookmark"], .tt h4, h4').first().text().trim();
+      const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
+      if (!title) return;
 
-        const slug = link.replace(/.*\/komik\//, '').replace(/\/$/, '');
-        if (seenSlugs.has(slug) || !isContentSafe({ title, slug })) return;
-        seenSlugs.add(slug);
+      const slug = link.replace(/.*\/komik\//, '').replace(/\/$/, '');
+      if (seenSlugs.has(slug) || !isContentSafe({ title, slug })) return;
+      seenSlugs.add(slug);
 
-        const img = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || '';
-        const typeFlagClass = $(el).find('.typeflag').attr('class') || '';
-        let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
-        if (typeFlagClass.toLowerCase().includes('manhwa')) type = 'manhwa';
-        else if (typeFlagClass.toLowerCase().includes('manhua')) type = 'manhua';
+      const img = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || '';
+      const typeFlagClass = $(el).find('.typeflag').attr('class') || '';
+      let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
+      if (typeFlagClass.toLowerCase().includes('manhwa')) type = 'manhwa';
+      else if (typeFlagClass.toLowerCase().includes('manhua')) type = 'manhua';
 
-        const isColored = type === 'manhwa' || type === 'manhua' || $(el).text().toLowerCase().includes('warna');
-        const latestChapterEl = $(el).find('.lsch a');
-        const latestChapter = latestChapterEl.text().trim();
-        const chapterUrl = latestChapterEl.attr('href') || '';
-        const chapterSlug = chapterUrl ? chapterUrl.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : undefined;
+      const isColored = type === 'manhwa' || type === 'manhua' || $(el).text().toLowerCase().includes('warna');
+      const latestChapterEl = $(el).find('.lsch a');
+      const latestChapter = latestChapterEl.text().trim();
+      const chapterUrl = latestChapterEl.attr('href') || '';
+      const chapterSlug = chapterUrl ? chapterUrl.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : undefined;
 
-        results.push({
-          title,
-          slug,
-          url: link,
-          img,
-          latestChapter,
-          chapterUrl,
-          chapterSlug,
-          type,
-          isColored,
-        });
+      results.push({
+        title,
+        slug,
+        url: link,
+        img,
+        latestChapter,
+        chapterUrl,
+        chapterSlug,
+        type,
+        isColored,
       });
-
-      if (results.length > 0) break;
-    } catch {}
-  }
+    });
+  } catch {}
 
   const safeResults = filterSafeList(results);
   setCache(cacheKey, safeResults);
@@ -354,86 +386,83 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
 
   // 1. Try Komikindo First (Fast, 200ms, active, no Cloudflare block)
   try {
-    const bases = [KOMIKINDO_ALT, KOMIKINDO_BASE];
-    for (const base of bases) {
-      for (const testSlug of candidateSlugs) {
-        try {
-          const url = `${base}/komik/${testSlug}/`;
-          const html = await fetchHtml(url);
-          const $ = cheerio.load(html);
+    for (const testSlug of candidateSlugs) {
+      try {
+        const { html, base: activeBase } = await fetchFromKomikindo(`/komik/${testSlug}/`);
+        const $ = cheerio.load(html);
 
-          const rawTitle = $('h1.entry-title').text().trim() || $('h1').text().trim();
-          const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
-          if (!title) continue;
+        const rawTitle = $('h1.entry-title').text().trim() || $('h1').text().trim();
+        const title = rawTitle.replace(/^Komik\s+/i, '').replace(/^Manga\s+/i, '').trim();
+        if (!title) continue;
 
-          const img = $('.thumb img').attr('data-src') || $('.thumb img').attr('src') || '';
-          const synopsis = $('.entry-content-single').text().trim() || 'Sinopsis belum tersedia.';
+        const img = $('.thumb img').attr('data-src') || $('.thumb img').attr('src') || '';
+        const rawSynopsis = $('.entry-content-single').text().trim() || 'Sinopsis belum tersedia.';
+        const synopsis = cleanSynopsis(rawSynopsis);
 
-          let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
-          let status = 'Ongoing';
-          let author = '';
-          let isColored = false;
+        let type: 'manga' | 'manhwa' | 'manhua' = 'manga';
+        let status = 'Ongoing';
+        let author = '';
+        let isColored = false;
 
-          $('.spe span').each((_, el) => {
-            const text = $(el).text().trim();
-            if (text.includes('Jenis Komik:')) {
-              const val = text.replace('Jenis Komik:', '').trim().toLowerCase();
-              if (val.includes('manhwa')) type = 'manhwa';
-              else if (val.includes('manhua')) type = 'manhua';
-            } else if (text.includes('Status:')) {
-              status = text.replace('Status:', '').trim();
-            } else if (text.includes('Pengarang:') || text.includes('Author:')) {
-              author = text.replace(/Pengarang:|Author:/i, '').trim();
-            }
-          });
-
-          if ((type as string) === 'manhwa' || (type as string) === 'manhua') isColored = true;
-          const rating = $('.archiveanime-rating i').text().trim() || $('.rating i').text().trim() || '8.5';
-
-          const genres: string[] = [];
-          $('.genre-info a, .spe a[href*="/genre/"]').each((_, el) => {
-            const g = $(el).text().trim();
-            if (g && !genres.includes(g)) genres.push(g);
-          });
-
-          const chapters: MangaDetail['chapters'] = [];
-          $('#chapter_list li').each((_, el) => {
-            const chLink = $(el).find('.lchx a').attr('href') || $(el).find('a').attr('href') || '';
-            const chTitle = $(el).find('.lchx a').text().trim() || $(el).find('a').text().trim();
-            const date = $(el).find('.dt').text().trim();
-
-            if (chLink && chTitle) {
-              const chSlug = chLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '');
-              chapters.push({ title: chTitle, slug: chSlug, url: chLink, date });
-            }
-          });
-
-          const detail: MangaDetail = {
-            title,
-            slug,
-            url,
-            img,
-            synopsis,
-            type,
-            status,
-            author,
-            rating,
-            isColored,
-            genres,
-            chapters,
-          };
-
-          if (!isContentSafe(detail)) {
-            console.warn(`[MangaScraper] Blocked NSFW manga detail from Komikindo: ${slug}`);
-            return null;
+        $('.spe span').each((_, el) => {
+          const text = $(el).text().trim();
+          if (text.includes('Jenis Komik:')) {
+            const val = text.replace('Jenis Komik:', '').trim().toLowerCase();
+            if (val.includes('manhwa')) type = 'manhwa';
+            else if (val.includes('manhua')) type = 'manhua';
+          } else if (text.includes('Status:')) {
+            status = text.replace('Status:', '').trim();
+          } else if (text.includes('Pengarang:') || text.includes('Author:')) {
+            author = text.replace(/Pengarang:|Author:/i, '').trim();
           }
+        });
 
-          if (chapters.length > 0) {
-            setCache(cacheKey, detail);
-            return detail;
+        if ((type as string) === 'manhwa' || (type as string) === 'manhua') isColored = true;
+        const rating = $('.archiveanime-rating i').text().trim() || $('.rating i').text().trim() || '8.5';
+
+        const genres: string[] = [];
+        $('.genre-info a, .spe a[href*="/genre/"]').each((_, el) => {
+          const g = $(el).text().trim();
+          if (g && !genres.includes(g)) genres.push(g);
+        });
+
+        const chapters: MangaDetail['chapters'] = [];
+        $('#chapter_list li').each((_, el) => {
+          const chLink = $(el).find('.lchx a').attr('href') || $(el).find('a').attr('href') || '';
+          const chTitle = $(el).find('.lchx a').text().trim() || $(el).find('a').text().trim();
+          const date = $(el).find('.dt').text().trim();
+
+          if (chLink && chTitle) {
+            const chSlug = chLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '');
+            chapters.push({ title: chTitle, slug: chSlug, url: chLink, date });
           }
-        } catch {}
-      }
+        });
+
+        const detail: MangaDetail = {
+          title,
+          slug: testSlug,
+          url: `${activeBase}/komik/${testSlug}/`,
+          img,
+          synopsis,
+          type,
+          status,
+          author,
+          rating,
+          isColored,
+          genres,
+          chapters,
+        };
+
+        if (!isContentSafe(detail)) {
+          console.warn(`[MangaScraper] Blocked NSFW manga detail from Komikindo: ${slug}`);
+          return null;
+        }
+
+        if (chapters.length > 0) {
+          setCache(cacheKey, detail);
+          return detail;
+        }
+      } catch {}
     }
   } catch (err) {
     console.warn('[MangaScraper] Komikindo detail failed, trying Komiku fallback:', err);
@@ -451,7 +480,8 @@ export async function getMangaDetail(slug: string): Promise<MangaDetail | null> 
         if (!rawTitle || rawTitle.includes('404')) continue;
 
         const img = $('.ims img').attr('src') || $('img.lazy').first().attr('data-src') || '';
-        const synopsis = $('.desc, #Sinopsis p, p.desc').text().trim() || 'Sinopsis komik.';
+        const rawSynopsis = $('.desc, #Sinopsis p, p.desc').text().trim() || 'Sinopsis komik.';
+        const synopsis = cleanSynopsis(rawSynopsis);
 
         const genres: string[] = [];
         $('.genre li a, .genre a').each((_, el) => {
@@ -516,59 +546,55 @@ export async function getChapterData(chapterSlug: string): Promise<ChapterData |
 
   // 1. Try Komikindo First (Fast, 200ms, no Cloudflare block)
   try {
-    const bases = [KOMIKINDO_ALT, KOMIKINDO_BASE];
     const candidatePaths = [
       `${cleanChapterSlug}`,
       `${cleanChapterSlug.replace(/chapter-(\d+)-(\d+)/i, 'chapter-$1.$2')}`,
       `ch/${cleanChapterSlug}`,
     ];
 
-    for (const base of bases) {
-      for (const path of candidatePaths) {
-        try {
-          const url = `${base}/${path}/`;
-          const html = await fetchHtml(url, 4500);
-          const $ = cheerio.load(html);
+    for (const path of candidatePaths) {
+      try {
+        const { html } = await fetchFromKomikindo(`/${path}/`);
+        const $ = cheerio.load(html);
 
-          const title = $('h1.entry-title').text().trim() || $('h1').text().trim();
-          if (!title || title.includes('404')) continue;
+        const title = $('h1.entry-title').text().trim() || $('h1').text().trim();
+        if (!title || title.includes('404')) continue;
 
-          const parentLink = $('.allc a').attr('href') || $('a[href*="/komik/"]').first().attr('href') || '';
-          const mangaSlug = parentLink.replace(/.*\/komik\//, '').replace(/\/$/, '');
-          const mangaTitle = $('.allc a').text().trim() || mangaSlug.replace(/-/g, ' ');
+        const parentLink = $('.allc a').attr('href') || $('a[href*="/komik/"]').first().attr('href') || '';
+        const mangaSlug = parentLink.replace(/.*\/komik\//, '').replace(/\/$/, '');
+        const mangaTitle = $('.allc a').text().trim() || mangaSlug.replace(/-/g, ' ');
 
-          const images: string[] = [];
-          $('#chimg-auh img, #readerarea img, .chapter-image img').each((_, el) => {
-            const src = $(el).attr('data-src') || $(el).attr('src') || '';
-            if (src && !src.includes('iklan') && !src.includes('banner') && !src.includes('iklangif')) {
-              const fullSrc = src.startsWith('//') ? `https:${src}` : src;
-              if (!images.includes(fullSrc)) {
-                images.push(fullSrc);
-              }
+        const images: string[] = [];
+        $('#chimg-auh img, #readerarea img, .chapter-image img').each((_, el) => {
+          const src = $(el).attr('data-src') || $(el).attr('src') || '';
+          if (src && !src.includes('iklan') && !src.includes('banner') && !src.includes('iklangif')) {
+            const fullSrc = src.startsWith('//') ? `https:${src}` : src;
+            if (!images.includes(fullSrc)) {
+              images.push(fullSrc);
             }
-          });
-
-          const prevLink = $('.nextprev a[rel="prev"]').attr('href') || $('.ch-prev-btn').attr('href');
-          const nextLink = $('.nextprev a[rel="next"]').attr('href') || $('.ch-next-btn').attr('href');
-
-          const prevChapterSlug = prevLink ? prevLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
-          const nextChapterSlug = nextLink ? nextLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
-
-          if (images.length > 0) {
-            const chapterData: ChapterData = {
-              title,
-              slug: cleanChapterSlug,
-              mangaTitle,
-              mangaSlug,
-              images,
-              prevChapterSlug,
-              nextChapterSlug,
-            };
-            setCache(cacheKey, chapterData);
-            return chapterData;
           }
-        } catch {}
-      }
+        });
+
+        const prevLink = $('.nextprev a[rel="prev"]').attr('href') || $('.ch-prev-btn').attr('href');
+        const nextLink = $('.nextprev a[rel="next"]').attr('href') || $('.ch-next-btn').attr('href');
+
+        const prevChapterSlug = prevLink ? prevLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
+        const nextChapterSlug = nextLink ? nextLink.replace(/https?:\/\/[^\/]+\//, '').replace(/\/$/, '') : null;
+
+        if (images.length > 0) {
+          const chapterData: ChapterData = {
+            title,
+            slug: cleanChapterSlug,
+            mangaTitle,
+            mangaSlug,
+            images,
+            prevChapterSlug,
+            nextChapterSlug,
+          };
+          setCache(cacheKey, chapterData);
+          return chapterData;
+        }
+      } catch {}
     }
   } catch (err) {
     console.warn('[MangaScraper] Komikindo chapter fetch error:', err);

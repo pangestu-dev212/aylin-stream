@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as https from 'https';
 import * as http from 'http';
+import { isDeadHost } from '@/lib/stream-scraper';
 
 // Ignore TLS errors for streaming sites with self-signed/expired certs
 if (typeof process !== 'undefined') {
@@ -210,8 +211,17 @@ export async function GET(req: NextRequest) {
   const targetUrl = searchParams.get('url');
   const customReferer = searchParams.get('referer');
 
-  if (!targetUrl) {
-    return new NextResponse('Missing url parameter', { status: 400 });
+  if (!targetUrl || isDeadHost(targetUrl)) {
+    return new NextResponse(
+      `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <script>window.parent.postMessage({ type: 'AYLIN_STREAM_ERROR', status: 410, message: 'Dead Host' }, '*');</script>
+      </head><body style="background:#0a0714;color:#f43f5e;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:8px">
+        <div style="font-size:32px">⚠️</div>
+        <div style="font-weight:bold">Server Video Tidak Aktif (Dead Host)</div>
+        <div style="font-size:12px;color:#94a3b8">Beralih ke mirror berikutnya...</div>
+      </body></html>`,
+      { status: 410, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+    );
   }
 
   let parsedTarget: URL;
@@ -243,6 +253,19 @@ export async function GET(req: NextRequest) {
   try {
     const { buffer, contentType, status } = await fetchWithDoh(targetUrl, refererOrigin);
 
+    if (status >= 400) {
+      return new NextResponse(
+        `<!DOCTYPE html><html><head><meta charset="utf-8">
+          <script>window.parent.postMessage({ type: 'AYLIN_STREAM_ERROR', status: ${status} }, '*');</script>
+        </head><body style="background:#0a0714;color:#f43f5e;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:8px">
+          <div style="font-size:32px">⚠️</div>
+          <div style="font-weight:bold">Server Video Error (HTTP ${status})</div>
+          <div style="font-size:12px;color:#94a3b8">Beralih ke mirror berikutnya...</div>
+        </body></html>`,
+        { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+      );
+    }
+
     const isHtml = contentType.includes('text/html');
 
     if (isHtml) {
@@ -269,10 +292,12 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error('[stream-proxy] Error:', targetUrl, err);
     return new NextResponse(
-      `<html><body style="background:#0a0714;color:#f43f5e;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:8px">
+      `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <script>window.parent.postMessage({ type: 'AYLIN_STREAM_ERROR', status: 502 }, '*');</script>
+      </head><body style="background:#0a0714;color:#f43f5e;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:8px">
         <div style="font-size:32px">⚠️</div>
-        <div style="font-weight:bold">Gagal memuat stream</div>
-        <div style="font-size:11px;color:#64748b">Coba ganti ke server mirror lain</div>
+        <div style="font-weight:bold">Gagal memuat stream video</div>
+        <div style="font-size:12px;color:#94a3b8">Beralih ke mirror alternatif...</div>
       </body></html>`,
       { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
     );

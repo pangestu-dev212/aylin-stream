@@ -1,4 +1,5 @@
 import { isContentSafe, isSafeQuery, filterSafeList } from '@/lib/content-filter';
+import { cleanSynopsis } from '@/lib/stream-scraper';
 
 const SANSEKAI_BASE = 'https://api.sansekai.my.id/api';
 
@@ -372,7 +373,8 @@ export async function getShortDramaDetail(bookId: string): Promise<ShortDramaDet
 
     const title = normalizeTitle(info.bookName || 'Short Drama');
     const cover = info.coverWap || info.cover || '';
-    const synopsis = info.introduction || info.synopsis || 'Sinopsis belum tersedia.';
+    const rawSynopsis = info.introduction || info.synopsis || 'Sinopsis belum tersedia.';
+    const synopsis = cleanSynopsis(rawSynopsis);
     const tags = Array.isArray(info.tags) ? info.tags : [];
 
     // Parse episodes

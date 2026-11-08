@@ -14,14 +14,238 @@ if (typeof process !== 'undefined') {
 }
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-const OTAKUDESU_BASE = 'https://otakudesu.blog';
-const ANICHIN_BASE = 'https://anichin.moe';
-const JURAGANFILM_BASE = 'https://tv49.juragan.film'; // Active domain
+// ==========================================
+// PROVIDER DOMAINS & FAILOVER SYSTEM
+// ==========================================
+
+export const PROVIDER_DOMAINS = {
+  otakudesu: ['https://otakudesu.blog', 'https://otakudesu.cloud', 'https://otakudesu.cam', 'https://otakudesu.best'],
+  anichin: ['https://anichin.moe', 'https://anichin.site', 'https://anichin.top', 'https://anichin.vip'],
+  juraganfilm: ['https://tv49.juragan.film', 'https://tv54.juragan.film', 'https://tv50.juragan.film', 'https://tv48.juragan.film'],
+  samehadaku: ['https://v2.samehadaku.how', 'https://samehadaku.care', 'https://samehadaku.email', 'https://samehadaku.video'],
+  animexin: ['https://animexin.dev', 'https://animexin.vip', 'https://animexin.site'],
+  donghuastream: ['https://donghuastream.org', 'https://donghuastream.co', 'https://donghuastream.net'],
+  gojonime: ['https://gojonime.net', 'https://gojonime.com'],
+} as const;
+
+export type ProviderKey = keyof typeof PROVIDER_DOMAINS;
+
+// Dynamic active working base tracker per provider
+const activeProviderBases: Record<string, string> = {
+  otakudesu: PROVIDER_DOMAINS.otakudesu[0],
+  anichin: PROVIDER_DOMAINS.anichin[0],
+  juraganfilm: PROVIDER_DOMAINS.juraganfilm[0],
+  samehadaku: PROVIDER_DOMAINS.samehadaku[0],
+  animexin: PROVIDER_DOMAINS.animexin[0],
+  donghuastream: PROVIDER_DOMAINS.donghuastream[0],
+  gojonime: PROVIDER_DOMAINS.gojonime[0],
+};
+
+export function getProviderBase(provider: ProviderKey): string {
+  return activeProviderBases[provider] || PROVIDER_DOMAINS[provider][0];
+}
+
+export function setProviderBase(provider: ProviderKey, base: string) {
+  activeProviderBases[provider] = base;
+  if (provider === 'otakudesu') OTAKUDESU_BASE = base;
+  if (provider === 'anichin') ANICHIN_BASE = base;
+  if (provider === 'juraganfilm') JURAGANFILM_BASE = base;
+  if (provider === 'samehadaku') SAMEHADAKU_BASE = base;
+  if (provider === 'animexin') ANIMEXIN_BASE = base;
+  if (provider === 'donghuastream') DONGHUASTREAM_BASE = base;
+  if (provider === 'gojonime') GOJONIME_BASE = base;
+}
+
+// Active domain constants (exported for full backward compatibility)
+export let OTAKUDESU_BASE: string = PROVIDER_DOMAINS.otakudesu[0];
+export let ANICHIN_BASE: string = PROVIDER_DOMAINS.anichin[0];
+export let JURAGANFILM_BASE: string = PROVIDER_DOMAINS.juraganfilm[0];
+export let SAMEHADAKU_BASE: string = PROVIDER_DOMAINS.samehadaku[0];
+export let ANIMEXIN_BASE: string = PROVIDER_DOMAINS.animexin[0];
+export let DONGHUASTREAM_BASE: string = PROVIDER_DOMAINS.donghuastream[0];
+export let GOJONIME_BASE: string = PROVIDER_DOMAINS.gojonime[0];
+
+// ==========================================
+// DEAD HOST FILTERING & EMBED VALIDATION
+// ==========================================
+
+export const DEAD_HOST_PATTERNS = [
+  /streamango\./i,
+  /openload\./i,
+  /oload\./i,
+  /rapidvideo\./i,
+  /rapidvid\./i,
+  /vexws\./i,
+  /verystream\./i,
+  /gorillavid\./i,
+  /vidzi\./i,
+  /vshare\./i,
+  /flashx\./i,
+  /thevideo\./i,
+  /streamcloud\./i,
+  /vidlox\./i
+];
+
+export function isDeadHost(url: string | undefined | null): boolean {
+  if (!url) return true;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === '#' || trimmed === 'about:blank') return true;
+  return DEAD_HOST_PATTERNS.some(p => p.test(trimmed));
+}
+
+// ==========================================
+// SYNOPSIS & SHORTCODE CLEANER
+// ==========================================
+
+export function cleanSynopsis(raw: string | undefined | null): string {
+  if (!raw) return 'Tidak ada sinopsis.';
+  const cleaned = raw
+    // Strip block-level shortcodes that encapsulate embed players, tabs, or download widgets
+    .replace(/\[tcos\][\s\S]*?\[\/tcos\]/gi, '')
+    .replace(/\[tab[^\]]*\][\s\S]*?\[\/tab\]/gi, '')
+    .replace(/\[wptab[^\]]*\][\s\S]*?\[\/wptab\]/gi, '')
+    .replace(/\[embed\][\s\S]*?\[\/embed\]/gi, '')
+    .replace(/\[download\][\s\S]*?\[\/download\]/gi, '')
+    .replace(/\[su_spoiler[^\]]*\][\s\S]*?\[\/su_spoiler\]/gi, '')
+    .replace(/\[su_[a-z0-9_-]+[^\]]*\][\s\S]*?\[\/su_[a-z0-9_-]+\]/gi, '')
+    // Strip inline or unclosed shortcode tags
+    .replace(/\[\/?(?:tcos|tab|wptab|stgo|vload|embed|download|shortcode|su_[a-z0-9_-]+|caption|gallery|playlist|video|audio|spoiler)[^\]]*\]/gi, '')
+    .replace(/title=["'][^"']*["']/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return cleaned || 'Tidak ada sinopsis.';
+}
+
+// ==========================================
+// UNIVERSAL EPISODE NUMBER PARSER
+// ==========================================
+
+export function formatEpisodeTitle(rawTitle: string, slug: string, fallbackNum?: number): string {
+  const trimmed = (rawTitle || '').trim();
+
+  // 1. Episode ranges, e.g. "Episode 01 - 25", "Episode 951 – 975", "01 - 12", "Ep 1 ~ 24"
+  const rangeMatch = trimmed.match(/(?:Episode|Ep)?\s*(\d+)\s*[-–—~]\s*(\d+)/i);
+  if (rangeMatch) {
+    return `Episode ${parseInt(rangeMatch[1], 10)} - ${parseInt(rangeMatch[2], 10)}`;
+  }
+
+  // 2. Numbered Movie / OVA / Special, e.g. "OVA 2", "Movie 3", "Special 1"
+  const numberedSpecialMatch = trimmed.match(/\b(movie|film|ova|special)\s*(\d+)\b/i) || slug.match(/\b(?:movie|film|ova|special)[-_](\d+)\b/i);
+  if (numberedSpecialMatch) {
+    const word = numberedSpecialMatch[1].toLowerCase();
+    const num = numberedSpecialMatch[2];
+    if (word === 'movie' || word === 'film') return `Movie ${num}`;
+    if (word === 'ova') return `OVA ${num}`;
+    if (word === 'special') return `Special ${num}`;
+  }
+
+  // 3. Movie / OVA / Special designations (without number)
+  const specialMatch = trimmed.match(/\b(movie|film|ova|special|batch|trailer)\b/i) || slug.match(/\b(movie|film|ova|special|batch)\b/i);
+  if (specialMatch && !trimmed.match(/(?:Episode|Ep)\s*\d+/i) && !slug.match(/[-_](?:episode|ep)[-_](\d+)/i)) {
+    const word = specialMatch[1].toLowerCase();
+    if (word === 'movie' || word === 'film') return 'Full Movie';
+    if (word === 'ova') return 'OVA';
+    if (word === 'special') return 'Special';
+    if (word === 'batch') return 'Batch';
+  }
+
+  // 4. Standard Episode number in title, e.g. "Episode 12", "Ep. 5", "Ep 1050", "E12", "E 12"
+  const epMatch = trimmed.match(/Episode\s*(\d+)/i) || 
+                  trimmed.match(/Ep\.?\s*(\d+)/i) || 
+                  trimmed.match(/\bE\s*(\d+)\b/i);
+  if (epMatch) {
+    return `Episode ${parseInt(epMatch[1], 10)}`;
+  }
+
+  // 5. Pure numeric title, e.g. "23"
+  const pureNumMatch = trimmed.match(/^(\d+)$/);
+  if (pureNumMatch) {
+    return `Episode ${parseInt(pureNumMatch[1], 10)}`;
+  }
+
+  // 6. Episode number extracted from slug
+  if (slug) {
+    const slugEpMatch = slug.match(/[-_]episode[-_](\d+)/i) || 
+                        slug.match(/[-_]ep[-_](\d+)/i) ||
+                        slug.match(/[-_]e(\d+)(?:-sub-indo)?$/i) ||
+                        slug.match(/[-_](\d+)(?:-sub-indo)?$/i);
+    if (slugEpMatch) {
+      const num = parseInt(slugEpMatch[1], 10);
+      if (num < 1900 || num > 2099) {
+        return `Episode ${num}`;
+      }
+    }
+  }
+
+  // 7. Clean generic boilerplate
+  const cleaned = trimmed
+    .replace(/Subtitle Indonesia/i, '')
+    .replace(/Sub Indo/i, '')
+    .replace(/Nonton/i, '')
+    .trim();
+
+  // If text is generic "Episode", "Tonton", "Watch", or empty, use fallbackNum
+  if (!cleaned || /^(?:episode|tonton|watch|putar|play)$/i.test(cleaned)) {
+    return fallbackNum !== undefined ? `Episode ${fallbackNum}` : 'Episode 1';
+  }
+
+  // If cleaned has digits and is short, keep it
+  if (/\d/.test(cleaned) && cleaned.length < 25) {
+    return cleaned;
+  }
+
+  return fallbackNum !== undefined ? `Episode ${fallbackNum}` : cleaned;
+}
+
+// ==========================================
+// TIERED CACHE (ONGOING VS TAMAT/COMPLETED)
+// ==========================================
+
+export const CACHE_TTL_ONGOING_MS = 3 * 60 * 1000; // 3 minutes for ongoing releases (fast realtime sync)
+export const CACHE_TTL_COMPLETED_MS = 12 * 60 * 60 * 1000; // 12 hours for completed/archived series
+export const CACHE_TTL_EPISODE_MS = 2 * 60 * 60 * 1000; // 2 hours for episode mirrors
+export const CACHE_TTL_SEARCH_MS = 2 * 60 * 1000; // 2 minutes for searches
+
+export function isDetailOngoing(detail: AnimeDetail | any): boolean {
+  if (!detail) return false;
+  const detailsStr = Array.isArray(detail.details) ? detail.details.join(' ').toLowerCase() : '';
+  const titleStr = (detail.title || '').toLowerCase();
+  const slugStr = (detail.slug || '').toLowerCase();
+
+  // Movies/Films are completed static titles
+  if (titleStr.includes('movie') || slugStr.includes('movie') || titleStr.includes('film') || slugStr.includes('film')) {
+    return false;
+  }
+
+  if (
+    detailsStr.includes('ongoing') || 
+    detailsStr.includes('sedang tayang') || 
+    detailsStr.includes('sedang berjalan') || 
+    detailsStr.includes('releasing') || 
+    detailsStr.includes('publishing') ||
+    titleStr.includes('ongoing') ||
+    slugStr.includes('ongoing')
+  ) {
+    return true;
+  }
+
+  if (detailsStr.includes('completed') || detailsStr.includes('tamat')) {
+    return false;
+  }
+
+  return false;
+}
+
+export function getTieredTtl(detail: AnimeDetail | any): number {
+  return isDetailOngoing(detail) ? CACHE_TTL_ONGOING_MS : CACHE_TTL_COMPLETED_MS;
+}
 
 // Simple in-memory cache system for ongoing lists (TTL: 10 minutes)
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
+  ttl?: number;
 }
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -36,14 +260,16 @@ const globalScraperCache = new Map<string, CacheEntry<any>>();
 
 export function getFromCache<T>(key: string, ttlMs: number): T | null {
   const entry = globalScraperCache.get(key);
-  if (entry && (Date.now() - entry.timestamp) < ttlMs) {
+  if (!entry) return null;
+  const effectiveTtl = entry.ttl || ttlMs;
+  if ((Date.now() - entry.timestamp) < effectiveTtl) {
     return entry.data as T;
   }
   return null;
 }
 
-export function setInCache(key: string, data: any) {
-  globalScraperCache.set(key, { data, timestamp: Date.now() });
+export function setInCache(key: string, data: any, customTtlMs?: number) {
+  globalScraperCache.set(key, { data, timestamp: Date.now(), ttl: customTtlMs });
 }
 
 // In-memory DNS cache to avoid repeated lookups
@@ -254,6 +480,39 @@ export async function fetchHtml(url: string): Promise<string> {
   }
 }
 
+/**
+ * Executes a request against a provider's active domain, and automatically tries
+ * fallback mirror domains in order if the active domain times out or fails.
+ */
+export async function fetchFromProvider(
+  provider: ProviderKey,
+  pathBuilder: string | ((base: string) => string)
+): Promise<{ html: string; base: string }> {
+  const domains = PROVIDER_DOMAINS[provider];
+  const currentBase = getProviderBase(provider);
+  const orderedBases = [currentBase, ...domains.filter(d => d !== currentBase)];
+
+  let lastError: any = null;
+  for (const base of orderedBases) {
+    try {
+      const url = typeof pathBuilder === 'function' 
+        ? pathBuilder(base) 
+        : `${base}${pathBuilder.startsWith('/') ? '' : '/'}${pathBuilder}`;
+      const html = await fetchHtml(url);
+      if (html && html.length > 200) {
+        if (base !== currentBase) {
+          setProviderBase(provider, base);
+          console.warn(`[Failover] Provider ${provider} failed over to mirror: ${base}`);
+        }
+        return { html, base };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error(`All mirror domains failed for ${provider}`);
+}
+
 // ==========================================
 // OTAKUDESU SCRAPER
 // ==========================================
@@ -445,7 +704,7 @@ export async function getOtakudesuOngoing(): Promise<AnimeCard[]> {
   }
 
   try {
-    const html = await fetchHtml(`${OTAKUDESU_BASE}/`);
+    const { html } = await fetchFromProvider('otakudesu', '/');
     const $ = cheerio.load(html);
     const ongoing: AnimeCard[] = [];
 
@@ -477,17 +736,17 @@ export async function getOtakudesuOngoing(): Promise<AnimeCard[]> {
 
 export async function getOtakudesuDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `otakudesu:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
-    const url = `${OTAKUDESU_BASE}/anime/${slug}/`;
-    const html = await fetchHtml(url);
+    const { html } = await fetchFromProvider('otakudesu', `/anime/${slug}/`);
     const $ = cheerio.load(html);
 
     const title = $('.fotoanime .infozingle p').eq(0).find('span').text().replace(':', '').trim() || $('.fotoanime h1').text().trim();
     const img = $('.fotoanime img').attr('src') || '';
-    const synopsis = $('.sinopse .entry-content p').text().trim() || $('.sinopse p').text().trim();
+    const rawSynopsis = $('.sinopse .entry-content p').text().trim() || $('.sinopse p').text().trim();
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     const details: string[] = [];
     $('.fotoanime .infozingle p').each((i, el) => {
@@ -506,13 +765,17 @@ export async function getOtakudesuDetail(slug: string): Promise<AnimeDetail | nu
 
         const epSlug = extractSlug(epUrl);
         if (epTitle && epSlug) {
-          episodes.push({ title: epTitle, slug: epSlug, date: epDate });
+          episodes.push({ 
+            title: formatEpisodeTitle(epTitle, epSlug, episodes.length + 1), 
+            slug: epSlug, 
+            date: epDate 
+          });
         }
       });
     });
 
     const result = { title, slug, img, synopsis, details, episodes, type: 'anime' as const };
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err: any) {
     console.warn(`[Otakudesu] Detail skipped/not found for ${slug}: ${err?.message || err}`);
@@ -526,8 +789,7 @@ export async function getOtakudesuEpisode(slug: string) {
   if (cached) return cached;
 
   try {
-    const url = `${OTAKUDESU_BASE}/episode/${slug}/`;
-    const html = await fetchHtml(url);
+    const { html } = await fetchFromProvider('otakudesu', `/episode/${slug}/`);
     const $ = cheerio.load(html);
 
     const title = $('.venutama h1').text().trim();
@@ -542,7 +804,9 @@ export async function getOtakudesuEpisode(slug: string) {
         try {
           const decoded = Buffer.from(contentBase64, 'base64').toString('utf-8');
           const payload = JSON.parse(decoded);
-          mirrors.push({ quality, playerText, payload });
+          if (!isDeadHost(playerText)) {
+            mirrors.push({ quality, playerText, payload });
+          }
         } catch {
           // Ignore parse errors
         }
@@ -577,8 +841,9 @@ export async function getOtakudesuEpisode(slug: string) {
 
 export async function resolveOtakudesuMirror(id: number, i: number, q: string): Promise<string | null> {
   try {
+    const activeBase = getProviderBase('otakudesu');
     // 1. Fetch the nonce
-    const nonceRes = await fetch(`${OTAKUDESU_BASE}/wp-admin/admin-ajax.php`, {
+    const nonceRes = await fetch(`${activeBase}/wp-admin/admin-ajax.php`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -593,7 +858,7 @@ export async function resolveOtakudesuMirror(id: number, i: number, q: string): 
     if (!nonce) return null;
 
     // 2. Fetch the player iframe
-    const embedRes = await fetch(`${OTAKUDESU_BASE}/wp-admin/admin-ajax.php`, {
+    const embedRes = await fetch(`${activeBase}/wp-admin/admin-ajax.php`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -614,7 +879,8 @@ export async function resolveOtakudesuMirror(id: number, i: number, q: string): 
       // Extract iframe src
       const $ = cheerio.load(decodedHtml);
       const src = $('iframe').attr('src');
-      return src || null;
+      if (src && !isDeadHost(src)) return src;
+      return null;
     }
   } catch (err) {
     console.error("Error in resolveOtakudesuMirror:", err);
@@ -628,8 +894,7 @@ export async function getOtakudesuSearch(query: string): Promise<AnimeCard[]> {
   if (cached) return cached;
 
   try {
-    const url = `${OTAKUDESU_BASE}/?s=${encodeURIComponent(query)}&post_type=anime`;
-    const html = await fetchHtml(url);
+    const { html } = await fetchFromProvider('otakudesu', `/?s=${encodeURIComponent(query)}&post_type=anime`);
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
@@ -681,7 +946,7 @@ export async function getAnichinOngoing(): Promise<AnimeCard[]> {
   }
 
   try {
-    const html = await fetchHtml(`${ANICHIN_BASE}/`);
+    const { html, base: activeBase } = await fetchFromProvider('anichin', '/');
     const $ = cheerio.load(html);
     const ongoing: AnimeCard[] = [];
 
@@ -707,8 +972,8 @@ export async function getAnichinOngoing(): Promise<AnimeCard[]> {
         ongoing.push({
           title: cleanTitle,
           slug: seriesSlug,       // ← series slug for the detail/watch page
-          url: `${ANICHIN_BASE}/donghua/${seriesSlug}/`,
-          img: normalizeUrl(img, ANICHIN_BASE),
+          url: `${activeBase}/donghua/${seriesSlug}/`,
+          img: normalizeUrl(img, activeBase),
           ep: ep || 'Release',
           type: 'donghua',
           source: 'anichin'
@@ -731,18 +996,20 @@ export async function getAnichinOngoing(): Promise<AnimeCard[]> {
 
 export async function getAnichinDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `anichin:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
     let html = '';
     let $ = cheerio.load('');
     let epCount = 0;
+    let resolvedBase = getProviderBase('anichin');
 
     // Try format 1: /anime/slug/
     try {
-      const url = `${ANICHIN_BASE}/anime/${slug}/`;
-      html = await fetchHtml(url);
+      const res = await fetchFromProvider('anichin', `/anime/${slug}/`);
+      html = res.html;
+      resolvedBase = res.base;
       $ = cheerio.load(html);
       epCount = $('.eplister ul li').length;
     } catch {}
@@ -750,8 +1017,9 @@ export async function getAnichinDetail(slug: string): Promise<AnimeDetail | null
     // Try format 2: fallback /donghua/slug/
     if (epCount === 0) {
       try {
-        const url = `${ANICHIN_BASE}/donghua/${slug}/`;
-        html = await fetchHtml(url);
+        const res = await fetchFromProvider('anichin', `/donghua/${slug}/`);
+        html = res.html;
+        resolvedBase = res.base;
         $ = cheerio.load(html);
         epCount = $('.eplister ul li').length;
       } catch {}
@@ -760,8 +1028,9 @@ export async function getAnichinDetail(slug: string): Promise<AnimeDetail | null
     // Try format 3: fallback direct /slug/
     if (epCount === 0) {
       try {
-        const url = `${ANICHIN_BASE}/${slug}/`;
-        html = await fetchHtml(url);
+        const res = await fetchFromProvider('anichin', `/${slug}/`);
+        html = res.html;
+        resolvedBase = res.base;
         $ = cheerio.load(html);
         epCount = $('.eplister ul li').length;
       } catch {}
@@ -769,8 +1038,9 @@ export async function getAnichinDetail(slug: string): Promise<AnimeDetail | null
 
     const title = $('.info-content h1, .entry-title').text().trim();
     const rawImg = $('.thumb img').attr('src') || $('.thumb img').attr('data-src') || '';
-    const img = normalizeUrl(rawImg, ANICHIN_BASE);
-    const synopsis = $('.entry-content p, .sinopse p').text().trim();
+    const img = normalizeUrl(rawImg, resolvedBase);
+    const rawSynopsis = $('.entry-content p, .sinopse p').text().trim();
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     const details: string[] = [];
     $('.info-content .spe span').each((i, el) => {
@@ -785,12 +1055,16 @@ export async function getAnichinDetail(slug: string): Promise<AnimeDetail | null
 
       const epSlug = extractSlug(epUrl);
       if (epTitle && epSlug) {
-        episodes.push({ title: epTitle, slug: epSlug, date: epDate });
+        episodes.push({ 
+          title: formatEpisodeTitle(epTitle, epSlug, episodes.length + 1), 
+          slug: epSlug, 
+          date: epDate 
+        });
       }
     });
 
     const result = { title, slug, img, synopsis, details, episodes, type: 'donghua' as const };
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err) {
     console.error(`Error in getAnichinDetail for ${slug}:`, err);
@@ -854,8 +1128,7 @@ export async function getAnichinEpisode(slug: string) {
   if (cached) return cached;
 
   try {
-    const url = `${ANICHIN_BASE}/${slug}/`;
-    const html = await fetchHtml(url);
+    const { html, base: activeBase } = await fetchFromProvider('anichin', `/${slug}/`);
     const $ = cheerio.load(html);
 
     const title = $('.entry-title, h1').text().trim();
@@ -865,14 +1138,16 @@ export async function getAnichinEpisode(slug: string) {
     // 1. Get the default player iframe
     let defaultSrc = $('iframe').attr('src') || '';
     if (defaultSrc) {
-      defaultSrc = normalizeUrl(defaultSrc, ANICHIN_BASE);
-      // Try to extract direct video URL from the default embed
-      const directSrc = await extractDirectVideoSrc(defaultSrc);
-      mirrors.push({
-        quality: 'HD',
-        playerText: 'Default Player',
-        payload: { src: defaultSrc, directSrc: directSrc || null }
-      });
+      defaultSrc = normalizeUrl(defaultSrc, activeBase);
+      if (!isDeadHost(defaultSrc)) {
+        // Try to extract direct video URL from the default embed
+        const directSrc = await extractDirectVideoSrc(defaultSrc);
+        mirrors.push({
+          quality: 'HD',
+          playerText: 'Default Player',
+          payload: { src: defaultSrc, directSrc: directSrc || null }
+        });
+      }
     }
 
     // 2. Extract options from select.mirror
@@ -880,7 +1155,7 @@ export async function getAnichinEpisode(slug: string) {
     $('select.mirror option').each((i, el) => {
       const val = $(el).attr('value');
       const text = $(el).text().trim();
-      if (!val) return;
+      if (!val || isDeadHost(text)) return;
       
       mirrorPromises.push((async () => {
         try {
@@ -888,8 +1163,8 @@ export async function getAnichinEpisode(slug: string) {
           const $iframe = cheerio.load(decoded);
           let iframeSrc = $iframe('iframe').attr('src') || '';
           if (iframeSrc) {
-            iframeSrc = normalizeUrl(iframeSrc, ANICHIN_BASE);
-            if (iframeSrc !== defaultSrc) {
+            iframeSrc = normalizeUrl(iframeSrc, activeBase);
+            if (iframeSrc !== defaultSrc && !isDeadHost(iframeSrc)) {
               // Try to extract direct video URL
               const directSrc = await extractDirectVideoSrc(iframeSrc);
               mirrors.push({
@@ -907,7 +1182,10 @@ export async function getAnichinEpisode(slug: string) {
 
     await Promise.all(mirrorPromises);
 
-    const result = { title, slug, mirrors };
+    const validMirrors = mirrors.filter(m => !isDeadHost(m.payload?.src));
+    if (validMirrors.length === 0) return null;
+
+    const result = { title, slug, mirrors: validMirrors };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -923,8 +1201,7 @@ export async function getAnichinSearch(query: string): Promise<AnimeCard[]> {
   if (cached) return cached;
 
   try {
-    const url = `${ANICHIN_BASE}/?s=${encodeURIComponent(query)}`;
-    const html = await fetchHtml(url);
+    const { html } = await fetchFromProvider('anichin', `/?s=${encodeURIComponent(query)}`);
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
@@ -967,15 +1244,14 @@ export async function getJuraganfilmOngoing(): Promise<AnimeCard[]> {
   }
 
   try {
-    const urls = [
-      `${JURAGANFILM_BASE}/`,
-      `${JURAGANFILM_BASE}/page/2/`,
-      `${JURAGANFILM_BASE}/page/3/`
-    ];
-
-    const htmls = await Promise.all(urls.map(url => fetchHtml(url).catch(() => '')));
+    const { html: html1, base: activeBase } = await fetchFromProvider('juraganfilm', '/');
+    const [html2, html3] = await Promise.all([
+      fetchHtml(`${activeBase}/page/2/`).catch(() => ''),
+      fetchHtml(`${activeBase}/page/3/`).catch(() => '')
+    ]);
     const ongoing: AnimeCard[] = [];
 
+    const htmls = [html1, html2, html3];
     htmls.forEach(html => {
       if (!html) return;
       const $ = cheerio.load(html);
@@ -1105,12 +1381,9 @@ export async function getJuraganfilmIndonesia(): Promise<AnimeCard[]> {
   }
 
   try {
-    const urls = [
-      `${JURAGANFILM_BASE}/country/indonesia/`,
-      `${JURAGANFILM_BASE}/country/indonesia/page/2/`,
-    ];
-
-    const htmls = await Promise.all(urls.map(url => fetchHtml(url).catch(() => '')));
+    const { html: html1, base: activeBase } = await fetchFromProvider('juraganfilm', '/country/indonesia/');
+    const html2 = await fetchHtml(`${activeBase}/country/indonesia/page/2/`).catch(() => '');
+    const htmls = [html1, html2];
     const list: AnimeCard[] = [];
 
     htmls.forEach(html => {
@@ -1153,24 +1426,24 @@ export async function getJuraganfilmIndonesia(): Promise<AnimeCard[]> {
 
 export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `juraganfilm:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
     // Real Juraganfilm slugs use /film-seri/ for series and /film/ for movies
     // Slugs often start with 'nonton-' e.g. nonton-the-early-spring-2026-sub-indo
-    const candidateUrls = [
-      `${JURAGANFILM_BASE}/film-seri/${slug}/`,
-      `${JURAGANFILM_BASE}/film/${slug}/`,
-      `${JURAGANFILM_BASE}/${slug}/`
+    const candidatePaths = [
+      `/film-seri/${slug}/`,
+      `/film/${slug}/`,
+      `/${slug}/`
     ];
 
     let $: cheerio.CheerioAPI | null = null;
     let title = '';
 
-    for (const testUrl of candidateUrls) {
+    for (const testPath of candidatePaths) {
       try {
-        const fetched = await fetchHtml(testUrl);
+        const { html: fetched } = await fetchFromProvider('juraganfilm', testPath);
         const $test = cheerio.load(fetched);
         const t = $test('.entry-title, h1').first().text().trim();
         // Reject soft-404 pages (tag pages, search result pages, "not found" pages)
@@ -1201,10 +1474,7 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
     
     // Synopsis - strip any broken third-party shortcodes (e.g. [tcos][tab title="Streamango"]...)
     const rawSynopsis = $('.entry-content p').text().trim() || $('.entry-content').text().trim() || 'Tidak ada sinopsis.';
-    const synopsis = rawSynopsis
-      .replace(/\[\/?(?:tcos|tab|stgo|vload|embed|shortcode)[^\]]*\]/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim() || 'Tidak ada sinopsis.';
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     // Details/Meta
     const details: string[] = [];
@@ -1220,7 +1490,7 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
     if (epsWrap.length > 0) {
       // Current active page is Episode 1
       episodes.push({
-        title: 'Episode 1',
+        title: formatEpisodeTitle('Episode 1', slug, 1),
         slug: slug // episode 1 is the main slug itself
       });
 
@@ -1235,7 +1505,7 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
           
           if (pageNum && !isNaN(Number(pageNum))) {
             episodes.push({
-              title: `Episode ${pageNum}`,
+              title: formatEpisodeTitle(`Episode ${pageNum}`, `${slug}/${pageNum}`, Number(pageNum)),
               slug: `${slug}/${pageNum}` // relative format
             });
           }
@@ -1244,13 +1514,13 @@ export async function getJuraganfilmDetail(slug: string): Promise<AnimeDetail | 
     } else {
       // Standalone Movie (1 part)
       episodes.push({
-        title: 'Putar Film',
+        title: formatEpisodeTitle(title.toLowerCase().includes('movie') || title.toLowerCase().includes('film') ? 'Full Movie' : 'Putar Film', slug, 1),
         slug: slug
       });
     }
 
     const result = { title, slug, img, synopsis, details, episodes, type: 'donghua' as const };
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err) {
     console.error(`Error in getJuraganfilmDetail for ${slug}:`, err);
@@ -1264,6 +1534,7 @@ export async function getJuraganfilmEpisode(slug: string) {
   if (cached) return cached;
 
   try {
+    const activeBase = getProviderBase('juraganfilm');
     // If slug contains a slash (e.g. "nonton-drama/2"), split it
     const parts = slug.split('/');
     const mainSlug = parts[0];
@@ -1272,51 +1543,80 @@ export async function getJuraganfilmEpisode(slug: string) {
     const isMovie = mainSlug.startsWith('nonton-') || mainSlug.includes('movie');
     const candidateUrls = pageNum
       ? [
-          `${JURAGANFILM_BASE}/film-seri/${mainSlug}/${pageNum}/`,
-          `${JURAGANFILM_BASE}/${mainSlug}/${pageNum}/`,
-          `${JURAGANFILM_BASE}/film/${mainSlug}/${pageNum}/`
+          `${activeBase}/film-seri/${mainSlug}/${pageNum}/`,
+          `${activeBase}/${mainSlug}/${pageNum}/`,
+          `${activeBase}/film/${mainSlug}/${pageNum}/`
         ]
       : (isMovie
           ? [
-              `${JURAGANFILM_BASE}/${mainSlug}/`,
-              `${JURAGANFILM_BASE}/film/${mainSlug}/`,
-              `${JURAGANFILM_BASE}/film-seri/${mainSlug}/`
+              `${activeBase}/${mainSlug}/`,
+              `${activeBase}/film/${mainSlug}/`,
+              `${activeBase}/film-seri/${mainSlug}/`
             ]
           : [
-              `${JURAGANFILM_BASE}/film-seri/${mainSlug}/`,
-              `${JURAGANFILM_BASE}/${mainSlug}/`,
-              `${JURAGANFILM_BASE}/film/${mainSlug}/`
+              `${activeBase}/film-seri/${mainSlug}/`,
+              `${activeBase}/${mainSlug}/`,
+              `${activeBase}/film/${mainSlug}/`
             ]
         );
 
     let title = '';
     let playerSrc = '';
+    let aliveFrames: string[] = [];
 
     for (const testUrl of candidateUrls) {
       try {
         const fetched = await fetchHtml(testUrl);
         const $test = cheerio.load(fetched);
-        const src = $test('iframe').attr('src') || $test('iframe').attr('data-src') || '';
-        if (src) {
+        
+        const candidateIframes: string[] = [];
+        $test('iframe').each((_, el) => {
+          const s = $test(el).attr('src') || $test(el).attr('data-src') || '';
+          if (s) candidateIframes.push(normalizeUrl(s, activeBase));
+        });
+
+        // Also inspect alternative tabs or mirror buttons
+        $test('.muvipro-player-tabs a, select.mirror option, a[data-frame]').each((_, el) => {
+          const s = $test(el).attr('data-frame') || $test(el).attr('value') || '';
+          if (s && (s.startsWith('http') || s.startsWith('//') || s.startsWith('/'))) {
+            candidateIframes.push(normalizeUrl(s, activeBase));
+          }
+        });
+
+        // Pick non-dead-host players
+        aliveFrames = candidateIframes.filter(s => !isDeadHost(s));
+        if (aliveFrames.length > 0) {
           title = $test('.entry-title, h1').first().text().trim();
-          playerSrc = normalizeUrl(src, JURAGANFILM_BASE);
+          playerSrc = aliveFrames[0];
           break;
         }
       } catch {}
     }
 
     if (!playerSrc) {
-      console.warn(`No player iframe found for Juraganfilm slug: ${slug}`);
+      console.warn(`No active player iframe found for Juraganfilm slug: ${slug}`);
       return null;
     }
 
     const mirrors: any[] = [];
 
-    // Always include web embed player as the primary high-compatibility option
-    mirrors.push({
-      quality: 'HD',
-      playerText: 'Web Player (Embed)',
-      payload: { src: playerSrc }
+    // Always include web embed player as the primary high-compatibility option if not dead
+    if (!isDeadHost(playerSrc)) {
+      mirrors.push({
+        quality: 'HD',
+        playerText: 'Web Player (Embed)',
+        payload: { src: playerSrc }
+      });
+    }
+
+    // Add additional alive iframe alternatives
+    aliveFrames.forEach((frameUrl, idx) => {
+      if (idx === 0) return; // already added as Web Player (Embed)
+      mirrors.push({
+        quality: 'HD',
+        playerText: `Server ${idx + 1} (Mirror)`,
+        payload: { src: frameUrl }
+      });
     });
 
     // If iframe is jf_engine, fetch jf_engine to extract direct SOURCES (MP4/HLS)
@@ -1328,7 +1628,7 @@ export async function getJuraganfilmEpisode(slug: string) {
           const sources = JSON.parse(sourceMatch[1]);
           if (Array.isArray(sources)) {
             // Add MP4 sources first (compatible natively with <video>)
-            const mp4Sources = sources.filter((s: any) => s.link && (s.link.includes('.mp4') || s.label?.includes('MP4')));
+            const mp4Sources = sources.filter((s: any) => s.link && !isDeadHost(s.link) && (s.link.includes('.mp4') || s.label?.includes('MP4')));
             mp4Sources.forEach((s: any, idx: number) => {
               mirrors.push({
                 quality: s.label || 'MP4',
@@ -1341,7 +1641,7 @@ export async function getJuraganfilmEpisode(slug: string) {
             });
 
             // Then add adaptive HLS sources
-            const otherSources = sources.filter((s: any) => s.link && !s.link.includes('.mp4') && !s.label?.includes('MP4'));
+            const otherSources = sources.filter((s: any) => s.link && !isDeadHost(s.link) && !s.link.includes('.mp4') && !s.label?.includes('MP4'));
             otherSources.forEach((s: any, idx: number) => {
               mirrors.push({
                 quality: s.label || 'Streaming',
@@ -1359,7 +1659,10 @@ export async function getJuraganfilmEpisode(slug: string) {
       }
     }
 
-    const result = { title, slug, mirrors };
+    const validMirrors = mirrors.filter(m => !isDeadHost(m.payload?.src));
+    if (validMirrors.length === 0) return null;
+
+    const result = { title, slug, mirrors: validMirrors };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -1374,8 +1677,7 @@ export async function getJuraganfilmSearch(query: string): Promise<AnimeCard[]> 
   if (cached) return cached;
 
   try {
-    const url = `${JURAGANFILM_BASE}/?s=${encodeURIComponent(query)}`;
-    const html = await fetchHtml(url);
+    const { html, base: activeBase } = await fetchFromProvider('juraganfilm', `/?s=${encodeURIComponent(query)}`);
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
 
@@ -1391,8 +1693,8 @@ export async function getJuraganfilmSearch(query: string): Promise<AnimeCard[]> 
         results.push({
           title,
           slug,
-          url,
-          img,
+          url: normalizeUrl(url, activeBase),
+          img: normalizeUrl(img, activeBase),
           type: 'donghua', // will resolve as 'drama' on search client mapping
           source: 'juraganfilm'
         });
@@ -1676,7 +1978,7 @@ export async function getDonghuaSchedule(): Promise<DaySchedule[]> {
 // SAMEHADAKU SCRAPER (ALTERNATIVE ANIME)
 // ==========================================
 
-const SAMEHADAKU_BASE = 'https://v2.samehadaku.how';
+
 
 let samehadakuOngoingCache: { data: AnimeCard[]; timestamp: number } | null = null;
 
@@ -1741,7 +2043,7 @@ export async function getSamehadakuOngoing(): Promise<AnimeCard[]> {
 
 export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `samehadaku:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 3 * 60 * 1000); // 3 minutes for ongoing updates
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
@@ -1794,7 +2096,8 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
     const title = rawTitle.replace(/Sub\s+Indo/i, '').replace(/Nonton\s+Anime\s+/i, '').trim();
     const rawImg = $('.thumb img').attr('src') || $('.info-content img').attr('src') || $('img.sw-poster-gbr').attr('src') || $('img').first().attr('src') || '';
     const img = normalizeUrl(rawImg, SAMEHADAKU_BASE);
-    const synopsis = $('.entry-content p, .desc p, .desc').text().trim() || $('.entry-content').text().trim() || 'Tidak ada sinopsis.';
+    const rawSynopsis = $('.entry-content p, .desc p, .desc').text().trim() || $('.entry-content').text().trim() || 'Tidak ada sinopsis.';
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     const details: string[] = [];
     $('.info-content .spe span, .spe span').each((i, el) => {
@@ -1812,22 +2115,7 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
       
       const epSlug = extractSlug(epUrl);
       if (epSlug && epSlug !== seriesSlug) {
-        const epMatch = epText.match(/Episode\s+\d+/i);
-        const slugMatch = epSlug.match(/[-_]episode[-_](\d+)/i) || epSlug.match(/[-_]ep[-_](\d+)/i);
-        const numMatch = epText.match(/^\d+$/);
-
-        let displayTitle = '';
-        if (epMatch) {
-          displayTitle = epMatch[0];
-        } else if (slugMatch) {
-          displayTitle = `Episode ${slugMatch[1]}`;
-        } else if (numMatch) {
-          displayTitle = `Episode ${numMatch[0]}`;
-        } else if (epText && !/^(?:tonton|episode)$/i.test(epText.trim())) {
-          displayTitle = epText.trim();
-        } else {
-          displayTitle = 'Episode';
-        }
+        const displayTitle = formatEpisodeTitle(epText, epSlug, episodes.length + 1);
 
         const existing = episodes.find(e => e.slug === epSlug);
         if (existing) {
@@ -1843,14 +2131,14 @@ export async function getSamehadakuDetail(slug: string): Promise<AnimeDetail | n
     // Fallback for single Movie/OVA pages if no separate episode list was found
     if (episodes.length === 0) {
       if (title.toLowerCase().includes('movie') || seriesSlug.includes('movie')) {
-        episodes.push({ title: 'Full Movie', slug: seriesSlug });
+        episodes.push({ title: formatEpisodeTitle('Full Movie', seriesSlug, 1), slug: seriesSlug });
       } else {
         return null;
       }
     }
 
     const result: AnimeDetail = { title, slug: seriesSlug, img, synopsis, details, episodes, type: 'anime' };
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err) {
     console.error(`Error in getSamehadakuDetail for ${slug}:`, err);
@@ -1939,11 +2227,13 @@ export async function getSamehadakuEpisode(slug: string) {
     const defaultSrc = $('iframe').attr('src') || $('iframe').attr('data-src') || '';
     if (defaultSrc && !defaultSrc.includes('facebook.com')) {
       const normalizedDefault = normalizeUrl(defaultSrc, SAMEHADAKU_BASE);
-      mirrors.push({
-        quality: 'HD',
-        playerText: 'Web Player (Embed)',
-        payload: { src: normalizedDefault }
-      });
+      if (!isDeadHost(normalizedDefault)) {
+        mirrors.push({
+          quality: 'HD',
+          playerText: 'Web Player (Embed)',
+          payload: { src: normalizedDefault }
+        });
+      }
     }
 
     // 2b. Script player embeds (e.g. file.fm embedded scripts)
@@ -1967,7 +2257,7 @@ export async function getSamehadakuEpisode(slug: string) {
       const type = $(el).attr('data-type');
       const text = $(el).find('span').text().trim() || $(el).text().trim();
       
-      if (!post || !nume || !type) return;
+      if (!post || !nume || !type || isDeadHost(text)) return;
 
       optionPromises.push((async () => {
         try {
@@ -1995,11 +2285,13 @@ export async function getSamehadakuEpisode(slug: string) {
             let iframeSrc = $iframe('iframe').attr('src') || '';
             if (iframeSrc) {
               iframeSrc = normalizeUrl(iframeSrc, SAMEHADAKU_BASE);
-              mirrors.push({
-                quality: 'HD',
-                playerText: text,
-                payload: { src: iframeSrc }
-              });
+              if (!isDeadHost(iframeSrc)) {
+                mirrors.push({
+                  quality: 'HD',
+                  playerText: text,
+                  payload: { src: iframeSrc }
+                });
+              }
             }
           }
         } catch {}
@@ -2008,7 +2300,10 @@ export async function getSamehadakuEpisode(slug: string) {
 
     await Promise.all(optionPromises);
 
-    const result = { title, slug, mirrors };
+    const validMirrors = mirrors.filter(m => !isDeadHost(m.payload?.src));
+    if (validMirrors.length === 0) return null;
+
+    const result = { title, slug, mirrors: validMirrors };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -2068,7 +2363,7 @@ export async function getSamehadakuSearch(query: string): Promise<AnimeCard[]> {
 // ANIMEXIN SCRAPER (ALTERNATIVE DONGHUA)
 // ==========================================
 
-const ANIMEXIN_BASE = 'https://animexin.dev';
+
 
 export async function getAnimeXinOngoing(): Promise<AnimeCard[]> {
   const now = Date.now();
@@ -2121,7 +2416,7 @@ export async function getAnimeXinOngoing(): Promise<AnimeCard[]> {
 
 export async function getAnimeXinDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `animexin:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
@@ -2151,7 +2446,8 @@ export async function getAnimeXinDetail(slug: string): Promise<AnimeDetail | nul
     const title = $('h1.entry-title, .bigcontent .infox h1').text().trim() || $('h1').first().text().trim();
     const rawImg = $('.thumb img').attr('src') || $('.bigcontent img').attr('src') || '';
     const img = normalizeUrl(rawImg, ANIMEXIN_BASE);
-    const synopsis = $('.desc').text().trim() || $('.entry-content p').first().text().trim() || '';
+    const rawSynopsis = $('.desc').text().trim() || $('.entry-content p').first().text().trim() || '';
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     const details: string[] = [];
     $('.spe span').each((i, el) => {
@@ -2166,14 +2462,15 @@ export async function getAnimeXinDetail(slug: string): Promise<AnimeDetail | nul
       const epDate = $(el).find('.epl-date').text().trim();
 
       const epSlug = extractSlug(epUrl);
-      const displayTitle = epTitle || (epNum ? `Episode ${epNum}` : '');
+      const rawTitle = epTitle || (epNum ? `Episode ${epNum}` : '');
+      const displayTitle = formatEpisodeTitle(rawTitle, epSlug, episodes.length + 1);
       if (displayTitle && epSlug) {
         episodes.push({ title: displayTitle, slug: epSlug, date: epDate });
       }
     });
 
     const result: AnimeDetail = { title, slug, img, synopsis, details, episodes, type: 'donghua' };
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err) {
     console.error(`Error in getAnimeXinDetail for ${slug}:`, err);
@@ -2198,19 +2495,21 @@ export async function getAnimeXinEpisode(slug: string) {
     let defaultSrc = $('iframe').attr('src') || '';
     if (defaultSrc) {
       defaultSrc = normalizeUrl(defaultSrc, ANIMEXIN_BASE);
-      const directSrc = await extractDirectVideoSrc(defaultSrc);
-      mirrors.push({
-        quality: 'HD',
-        playerText: 'Default Player',
-        payload: { src: defaultSrc, directSrc: directSrc || null }
-      });
+      if (!isDeadHost(defaultSrc)) {
+        const directSrc = await extractDirectVideoSrc(defaultSrc);
+        mirrors.push({
+          quality: 'HD',
+          playerText: 'Default Player',
+          payload: { src: defaultSrc, directSrc: directSrc || null }
+        });
+      }
     }
 
     const mirrorPromises: Promise<void>[] = [];
     $('select.mirror option').each((i, el) => {
       const val = $(el).attr('value');
       const text = $(el).text().trim();
-      if (!val || text.toLowerCase().includes('select')) return;
+      if (!val || text.toLowerCase().includes('select') || isDeadHost(text)) return;
 
       mirrorPromises.push((async () => {
         try {
@@ -2219,7 +2518,7 @@ export async function getAnimeXinEpisode(slug: string) {
           let iframeSrc = $iframe('iframe').attr('src') || '';
           if (iframeSrc) {
             iframeSrc = normalizeUrl(iframeSrc, ANIMEXIN_BASE);
-            if (iframeSrc !== defaultSrc) {
+            if (iframeSrc !== defaultSrc && !isDeadHost(iframeSrc)) {
               const directSrc = await extractDirectVideoSrc(iframeSrc);
               mirrors.push({
                 quality: 'HD',
@@ -2236,7 +2535,10 @@ export async function getAnimeXinEpisode(slug: string) {
 
     await Promise.all(mirrorPromises);
 
-    const result = { title, slug, mirrors };
+    const validMirrors = mirrors.filter(m => !isDeadHost(m.payload?.src));
+    if (validMirrors.length === 0) return null;
+
+    const result = { title, slug, mirrors: validMirrors };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -2347,11 +2649,11 @@ export async function getAnimeXinCatalog(letter: string = 'ALL', page = 1): Prom
 // DONGHUASTREAM SCRAPER (ALTERNATIVE DONGHUA)
 // ==========================================
 
-const DONGHUASTREAM_BASE = 'https://donghuastream.org';
+
 
 export async function getDonghuastreamDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `donghuastream:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 30 * 60 * 1000); // 30 minutes
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
@@ -2362,7 +2664,8 @@ export async function getDonghuastreamDetail(slug: string): Promise<AnimeDetail 
     const title = $('.info-content h1, .entry-title').text().trim();
     const rawImg = $('.thumb img').attr('data-src') || $('.thumb img').attr('src') || '';
     const img = normalizeUrl(rawImg, DONGHUASTREAM_BASE);
-    const synopsis = $('.entry-content p, .sinopse p').text().trim() || $('.entry-content').text().trim();
+    const rawSynopsis = $('.entry-content p, .sinopse p').text().trim() || $('.entry-content').text().trim();
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     const details: string[] = [];
     $('.info-content .spe span, .spe span').each((i, el) => {
@@ -2377,12 +2680,16 @@ export async function getDonghuastreamDetail(slug: string): Promise<AnimeDetail 
 
       const epSlug = extractSlug(epUrl);
       if (epTitle && epSlug) {
-        episodes.push({ title: epTitle, slug: epSlug, date: epDate });
+        episodes.push({ 
+          title: formatEpisodeTitle(epTitle, epSlug, episodes.length + 1), 
+          slug: epSlug, 
+          date: epDate 
+        });
       }
     });
 
     const result: AnimeDetail = { title, slug, img, synopsis, details, episodes, type: 'donghua' };
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err) {
     console.error(`Error in getDonghuastreamDetail for ${slug}:`, err);
@@ -2407,12 +2714,14 @@ export async function getDonghuastreamEpisode(slug: string) {
     let defaultSrc = $('iframe').attr('data-litespeed-src') || $('iframe').attr('data-src') || $('iframe').attr('src') || '';
     if (defaultSrc && defaultSrc !== 'about:blank') {
       defaultSrc = normalizeUrl(defaultSrc, DONGHUASTREAM_BASE);
-      const directSrc = await extractDirectVideoSrc(defaultSrc);
-      mirrors.push({
-        quality: 'HD',
-        playerText: 'Default Player',
-        payload: { src: defaultSrc, directSrc: directSrc || null }
-      });
+      if (!isDeadHost(defaultSrc)) {
+        const directSrc = await extractDirectVideoSrc(defaultSrc);
+        mirrors.push({
+          quality: 'HD',
+          playerText: 'Default Player',
+          payload: { src: defaultSrc, directSrc: directSrc || null }
+        });
+      }
     }
 
     // 2. Extract options from select.mirror
@@ -2420,7 +2729,7 @@ export async function getDonghuastreamEpisode(slug: string) {
     $('select.mirror option').each((i, el) => {
       const val = $(el).attr('value');
       const text = $(el).text().trim();
-      if (!val || text.toLowerCase().includes('select video server')) return;
+      if (!val || text.toLowerCase().includes('select video server') || isDeadHost(text)) return;
 
       mirrorPromises.push((async () => {
         try {
@@ -2429,7 +2738,7 @@ export async function getDonghuastreamEpisode(slug: string) {
           let iframeSrc = $iframe('iframe').attr('data-litespeed-src') || $iframe('iframe').attr('data-src') || $iframe('iframe').attr('src') || '';
           if (iframeSrc) {
             iframeSrc = normalizeUrl(iframeSrc, DONGHUASTREAM_BASE);
-            if (iframeSrc !== defaultSrc) {
+            if (iframeSrc !== defaultSrc && !isDeadHost(iframeSrc)) {
               const directSrc = await extractDirectVideoSrc(iframeSrc);
               mirrors.push({
                 quality: 'HD',
@@ -2446,7 +2755,10 @@ export async function getDonghuastreamEpisode(slug: string) {
 
     await Promise.all(mirrorPromises);
 
-    const result = { title, slug, mirrors };
+    const validMirrors = mirrors.filter(m => !isDeadHost(m.payload?.src));
+    if (validMirrors.length === 0) return null;
+
+    const result = { title, slug, mirrors: validMirrors };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {
@@ -2499,7 +2811,7 @@ export async function getDonghuastreamSearch(query: string): Promise<AnimeCard[]
 // GOJONIME SCRAPER
 // ==========================================
 
-const GOJONIME_BASE = 'https://gojonime.net';
+
 
 export async function getGojonimeSearch(query: string): Promise<AnimeCard[]> {
   const cacheKey = `gojonime:search:${query}`;
@@ -2507,8 +2819,7 @@ export async function getGojonimeSearch(query: string): Promise<AnimeCard[]> {
   if (cached) return cached;
 
   try {
-    const url = `${GOJONIME_BASE}/?s=${encodeURIComponent(query)}`;
-    const html = await fetchHtml(url);
+    const { html, base: activeBase } = await fetchFromProvider('gojonime', `/?s=${encodeURIComponent(query)}`);
     const $ = cheerio.load(html);
     const results: AnimeCard[] = [];
     const seenSlugs = new Set<string>();
@@ -2528,8 +2839,8 @@ export async function getGojonimeSearch(query: string): Promise<AnimeCard[]> {
         results.push({
           title,
           slug,
-          url: normalizeUrl(href, GOJONIME_BASE),
-          img: normalizeUrl(img, GOJONIME_BASE),
+          url: normalizeUrl(href, activeBase),
+          img: normalizeUrl(img, activeBase),
           ep: ep || '',
           type: 'anime',
           source: 'gojonime'
@@ -2547,24 +2858,26 @@ export async function getGojonimeSearch(query: string): Promise<AnimeCard[]> {
 
 export async function getGojonimeDetail(slug: string): Promise<AnimeDetail | null> {
   const cacheKey = `gojonime:detail:${slug}`;
-  const cached = getFromCache<AnimeDetail>(cacheKey, 60 * 60 * 1000);
+  const cached = getFromCache<AnimeDetail>(cacheKey, CACHE_TTL_COMPLETED_MS);
   if (cached) return cached;
 
   try {
-    const candidateUrls = [
-      `${GOJONIME_BASE}/anime/${slug}/`,
-      `${GOJONIME_BASE}/${slug}/`
+    const candidatePaths = [
+      `/anime/${slug}/`,
+      `/${slug}/`
     ];
 
     let html = '';
     let $ = null;
-    for (const testUrl of candidateUrls) {
+    let resolvedBase = getProviderBase('gojonime');
+    for (const testPath of candidatePaths) {
       try {
-        const fetched = await fetchHtml(testUrl);
-        const $test = cheerio.load(fetched);
+        const res = await fetchFromProvider('gojonime', testPath);
+        const $test = cheerio.load(res.html);
         const t = $test('.entry-title, h1').first().text().trim();
         if (t && !t.toLowerCase().includes('page not found') && !t.toLowerCase().includes('404')) {
-          html = fetched;
+          html = res.html;
+          resolvedBase = res.base;
           $ = $test;
           break;
         }
@@ -2575,8 +2888,10 @@ export async function getGojonimeDetail(slug: string): Promise<AnimeDetail | nul
 
     const rawTitle = $('.entry-title, h1').first().text().trim();
     const title = rawTitle.replace(/Sub\s+Indo/i, '').trim();
-    const img = $('img.wp-post-image, .thumb img').attr('src') || $('img').first().attr('src') || '';
-    const synopsis = $('.entry-content p, .sinopsis, .desc').text().trim() || 'Tidak ada sinopsis.';
+    const rawImg = $('img.wp-post-image, .thumb img').attr('src') || $('img').first().attr('src') || '';
+    const img = normalizeUrl(rawImg, resolvedBase);
+    const rawSynopsis = $('.entry-content p, .sinopsis, .desc').text().trim() || 'Tidak ada sinopsis.';
+    const synopsis = cleanSynopsis(rawSynopsis);
 
     const details: string[] = [];
     $('.spe span, .info-content span').each((i, el) => {
@@ -2590,8 +2905,8 @@ export async function getGojonimeDetail(slug: string): Promise<AnimeDetail | nul
       const epSlug = extractSlug(epUrl);
       const epNum = $(el).find('.epl-num').text().trim();
       const epTitleText = $(el).find('.epl-title').text().trim() || a.text().trim();
-      const epMatch = epTitleText.match(/Episode\s+\d+/i);
-      const displayTitle = epMatch ? epMatch[0] : (epNum ? `Episode ${epNum}` : epTitleText);
+      const rawTitle = epTitleText || (epNum ? `Episode ${epNum}` : '');
+      const displayTitle = formatEpisodeTitle(rawTitle, epSlug, episodes.length + 1);
 
       if (epSlug && !episodes.some(e => e.slug === epSlug)) {
         episodes.push({
@@ -2601,19 +2916,19 @@ export async function getGojonimeDetail(slug: string): Promise<AnimeDetail | nul
       }
     });
 
-    // Invert to chronological order (Episode 1 first)
-    if (episodes.length > 0) {
-      episodes.reverse();
-    } else if (title.toLowerCase().includes('movie') || slug.includes('movie')) {
-      episodes.push({ title: 'Full Movie', slug });
-    } else {
-      return null;
+    // Consistent chronological descending order (matching Otakudesu & Samehadaku)
+    if (episodes.length === 0) {
+      if (title.toLowerCase().includes('movie') || slug.includes('movie')) {
+        episodes.push({ title: formatEpisodeTitle('Full Movie', slug, 1), slug });
+      } else {
+        return null;
+      }
     }
 
     const result: AnimeDetail = {
       title,
       slug,
-      img: normalizeUrl(img, GOJONIME_BASE),
+      img,
       synopsis,
       details,
       episodes,
@@ -2621,7 +2936,7 @@ export async function getGojonimeDetail(slug: string): Promise<AnimeDetail | nul
       source: 'gojonime'
     };
 
-    setInCache(cacheKey, result);
+    setInCache(cacheKey, result, getTieredTtl(result));
     return result;
   } catch (err) {
     console.error(`Error in getGojonimeDetail for ${slug}:`, err);
@@ -2635,8 +2950,7 @@ export async function getGojonimeEpisode(slug: string) {
   if (cached) return cached;
 
   try {
-    const url = `${GOJONIME_BASE}/${slug}/`;
-    const html = await fetchHtml(url);
+    const { html } = await fetchFromProvider('gojonime', `/${slug}/`);
     const $ = cheerio.load(html);
 
     const title = $('.entry-title, h1').first().text().trim();
@@ -2646,18 +2960,20 @@ export async function getGojonimeEpisode(slug: string) {
     $('select option').each((i, el) => {
       const text = $(el).text().trim();
       const val = $(el).attr('value') || '';
-      if (val && val.length > 20) {
+      if (val && val.length > 20 && !isDeadHost(text)) {
         try {
           const decoded = Buffer.from(val, 'base64').toString('utf8');
           const $iframe = cheerio.load(decoded);
           let src = $iframe('iframe').attr('src') || '';
           if (src) {
             if (src.startsWith('//')) src = 'https:' + src;
-            mirrors.push({
-              quality: text.includes('HD') ? 'HD' : 'SD',
-              playerText: text || `Server ${i + 1}`,
-              payload: { src }
-            });
+            if (!isDeadHost(src)) {
+              mirrors.push({
+                quality: text.includes('HD') ? 'HD' : 'SD',
+                playerText: text || `Server ${i + 1}`,
+                payload: { src }
+              });
+            }
           }
         } catch {}
       }
@@ -2665,7 +2981,7 @@ export async function getGojonimeEpisode(slug: string) {
 
     // Fallback to page iframe
     const pageIframe = $('iframe').attr('src') || $('iframe').attr('data-src') || '';
-    if (pageIframe && !mirrors.some(m => m.payload?.src === pageIframe)) {
+    if (pageIframe && !isDeadHost(pageIframe) && !mirrors.some(m => m.payload?.src === pageIframe)) {
       mirrors.unshift({
         quality: 'HD',
         playerText: 'Web Player',
@@ -2680,7 +2996,10 @@ export async function getGojonimeEpisode(slug: string) {
       return bIsBlogger - aIsBlogger;
     });
 
-    const result = { title, slug, mirrors };
+    const validMirrors = mirrors.filter(m => !isDeadHost(m.payload?.src));
+    if (validMirrors.length === 0) return null;
+
+    const result = { title, slug, mirrors: validMirrors };
     setInCache(cacheKey, result);
     return result;
   } catch (err) {

@@ -47,48 +47,105 @@ interface WatchClientProps {
 }
 
 function getCleanEpisodeNumber(title: string, fallbackNum: number, slug?: string): string {
-  // Try matching range first, e.g. "Episode 951 – 975" -> "951-975"
-  const rangeMatch = title.match(/Episode\s+(\d+)\s*–\s*(\d+)/i);
-  if (rangeMatch) return `Ep ${rangeMatch[1]}-${rangeMatch[2]}`;
+  const trimmed = (title || '').trim();
 
-  // Try matching single episode number, e.g. "Episode 1172" -> "1172"
-  const singleMatch = title.match(/Episode\s+(\d+)/i);
-  if (singleMatch) return `Ep ${singleMatch[1]}`;
+  // 1. Try matching range first, e.g. "Episode 01 - 25", "Episode 951 – 975", "01 - 12", "Ep 1 ~ 24"
+  const rangeMatch = trimmed.match(/(?:Episode|Ep)?\s*(\d+)\s*[-–—~]\s*(\d+)/i);
+  if (rangeMatch) return `Ep ${parseInt(rangeMatch[1], 10)}-${parseInt(rangeMatch[2], 10)}`;
 
-  // Try matching "Ep 123" pattern
-  const epMatch = title.match(/Ep\s+(\d+)/i);
-  if (epMatch) return `Ep ${epMatch[1]}`;
-
-  // Try matching pure number like "5" or "6"
-  const pureNumMatch = title.trim().match(/^(\d+)$/);
-  if (pureNumMatch) return `Ep ${pureNumMatch[1]}`;
-
-  // Try matching episode number from slug, e.g. "black-clover-season-2-episode-6" -> "Ep 6"
-  if (slug) {
-    const slugMatch = slug.match(/[-_]episode[-_](\d+)/i) || slug.match(/[-_]ep[-_](\d+)/i);
-    if (slugMatch) return `Ep ${slugMatch[1]}`;
+  // 2. Check for Movie / OVA / Special designations (preserve number if present, e.g. "OVA 2", "Movie 3")
+  const numberedSpecial = trimmed.match(/\b(movie|film|ova|special|batch)\s*(\d+)\b/i) || 
+                          (slug && slug.match(/[-_](movie|film|ova|special|batch)[-_](\d+)/i));
+  if (numberedSpecial) {
+    const word = numberedSpecial[1].toLowerCase();
+    const num = numberedSpecial[2];
+    const prefix = (word === 'movie' || word === 'film') ? 'Movie' : word.toUpperCase();
+    return `${prefix} ${num}`;
   }
 
-  // Fallback to title cleanup (removing common boilerplate)
-  const cleaned = title
+  const specialMatch = trimmed.match(/\b(movie|film|ova|special|batch|trailer)\b/i) || (slug && slug.match(/\b(movie|film|ova|special|batch)\b/i));
+  if (specialMatch && !trimmed.match(/Episode\s+\d+/i) && !(slug && slug.match(/[-_]episode[-_](\d+)/i))) {
+    const word = specialMatch[1].toLowerCase();
+    if (word === 'movie' || word === 'film') return 'Movie';
+    if (word === 'ova') return 'OVA';
+    if (word === 'special') return 'Special';
+    if (word === 'batch') return 'Batch';
+  }
+
+  // 3. Try matching single episode number, e.g. "Episode 1172" -> "Ep 1172", "E01" -> "Ep 1"
+  const singleMatch = trimmed.match(/Episode\s+(\d+)/i) || 
+                      trimmed.match(/Ep\.?\s*(\d+)/i) ||
+                      trimmed.match(/\bE(\d+)\b/i);
+  if (singleMatch) return `Ep ${parseInt(singleMatch[1], 10)}`;
+
+  // 4. Try matching pure number like "5" or "6"
+  const pureNumMatch = trimmed.match(/^(\d+)$/);
+  if (pureNumMatch) return `Ep ${parseInt(pureNumMatch[1], 10)}`;
+
+  // 5. Try matching episode number from slug, e.g. "black-clover-season-2-episode-6" -> "Ep 6"
+  if (slug) {
+    const slugMatch = slug.match(/[-_]episode[-_](\d+)/i) || 
+                      slug.match(/[-_]ep[-_](\d+)/i) ||
+                      slug.match(/[-_](\d+)(?:-sub-indo)?$/i);
+    if (slugMatch) {
+      const num = parseInt(slugMatch[1], 10);
+      // Ignore 4-digit release years like 2024 or 1999
+      if (num < 1900 || num > 2099) {
+        return `Ep ${num}`;
+      }
+    }
+  }
+
+  // 6. Fallback to title cleanup (removing common boilerplate)
+  const cleaned = trimmed
     .replace(/Subtitle Indonesia/i, '')
     .replace(/Sub Indo/i, '')
     .replace(/One Piece/i, '')
+    .replace(/Nonton/i, '')
     .trim();
 
-  // If cleaned is generic "Episode" or "Tonton" with no digits, use fallbackNum!
-  if (/^(?:episode|tonton)$/i.test(cleaned)) {
+  // If cleaned is generic "Episode", "Tonton", "Watch", or empty, use fallbackNum!
+  if (!cleaned || /^(?:episode|tonton|watch|putar|play)$/i.test(cleaned)) {
     return `Ep ${fallbackNum}`;
   }
 
-  if (cleaned.length > 0 && cleaned.length < 15 && /\d/.test(cleaned)) return cleaned;
+  if (cleaned.length > 0 && cleaned.length < 25 && /\d/.test(cleaned)) return cleaned;
 
   return `Ep ${fallbackNum}`;
+}
+
+function extractEpisodeNum(ep: EpisodeLink): number | null {
+  if (!ep) return null;
+  const match = (ep.title || '').match(/(?:Episode|Ep)\s*(\d+)/i) || 
+                (ep.title || '').match(/\bE(\d+)\b/i) ||
+                (ep.title || '').match(/^(\d+)$/) ||
+                (ep.slug || '').match(/[-_]episode[-_](\d+)/i) ||
+                (ep.slug || '').match(/[-_]ep[-_](\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function checkIsEpisodesAscending(episodes: EpisodeLink[], defaultType: string): boolean {
+  if (!episodes || episodes.length < 2) return defaultType === 'drama';
+  let firstNum: number | null = null;
+  for (let i = 0; i < Math.min(5, episodes.length); i++) {
+    const n = extractEpisodeNum(episodes[i]);
+    if (n !== null) { firstNum = n; break; }
+  }
+  let lastNum: number | null = null;
+  for (let i = episodes.length - 1; i >= Math.max(0, episodes.length - 5); i--) {
+    const n = extractEpisodeNum(episodes[i]);
+    if (n !== null) { lastNum = n; break; }
+  }
+  if (firstNum !== null && lastNum !== null && firstNum !== lastNum) {
+    return firstNum < lastNum;
+  }
+  return defaultType === 'drama';
 }
 
 export default function WatchClient({ initialData, type, slug, initialSource }: WatchClientProps) {
   const { theme, setTheme } = useTheme();
   const [data, setData] = useState<AnimeDetail>(initialData);
+  const isAscending = checkIsEpisodesAscending(data.episodes, type);
   const [activeSource, setActiveSource] = useState<'utama' | 'cadangan' | 'alternatif'>(() => {
     if (initialSource === 'animexin' || initialSource === 'samehadaku') return 'cadangan';
     if (initialSource === 'donghuastream') return 'alternatif';
@@ -104,6 +161,14 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
   const [playerLoading, setPlayerLoading] = useState(false);
   const [downloads, setDownloads] = useState<{ quality: string; size: string; links: { host: string; url: string }[] }[]>([]);
   const [error, setError] = useState<string>('');
+  const iframeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleIframeLoad = () => {
+    if (iframeTimeoutRef.current) {
+      clearTimeout(iframeTimeoutRef.current);
+      iframeTimeoutRef.current = null;
+    }
+  };
 
   // UI state
   const [isBookmarked, setIsBookmarked] = useState(false);
@@ -143,6 +208,58 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
   const hasResumedRef = useRef<string | null>(null);
   const [showNextTransition, setShowNextTransition] = useState(false);
   const [transitionCountdown, setTransitionCountdown] = useState(5);
+
+  // Episode Chunking & Search State (>25 episodes)
+  const EPISODES_PER_CHUNK = 25;
+  const [activeChunkIndex, setActiveChunkIndex] = useState(0);
+  const [episodeSearchQuery, setEpisodeSearchQuery] = useState('');
+
+  // Automatically switch episode chunk when activeEpisode changes
+  useEffect(() => {
+    if (!activeEpisode || !data.episodes || data.episodes.length <= EPISODES_PER_CHUNK) return;
+    const epIdx = data.episodes.findIndex(e => e.slug === activeEpisode.slug);
+    if (epIdx !== -1) {
+      const targetChunk = Math.floor(epIdx / EPISODES_PER_CHUNK);
+      setActiveChunkIndex(targetChunk);
+    }
+  }, [activeEpisode, data.episodes]);
+
+  // Listen for iframe stream errors dispatched by stream-proxy for automatic mirror failover
+  useEffect(() => {
+    const handleStreamMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'AYLIN_STREAM_ERROR') {
+        const errStatus = e.data.status ? `(HTTP ${e.data.status})` : '';
+        showHUD(`Server stream bermasalah ${errStatus}, beralih ke server berikutnya...`);
+        triggerAutoFallback();
+      }
+    };
+    window.addEventListener('message', handleStreamMessage);
+    return () => window.removeEventListener('message', handleStreamMessage);
+  }, [mirrors, activeMirror]);
+
+  // Handle iframe load timeout fallback (e.g. 9 seconds for slow/dead cross-origin mirrors)
+  useEffect(() => {
+    if (iframeTimeoutRef.current) {
+      clearTimeout(iframeTimeoutRef.current);
+      iframeTimeoutRef.current = null;
+    }
+
+    if (playerSrc && !playerSrc.endsWith('.mp4') && !playerSrc.includes('/api/video-proxy')) {
+      iframeTimeoutRef.current = setTimeout(() => {
+        if (mirrors.length > 1) {
+          showHUD("Waktu muat habis, mencoba server mirror berikutnya...");
+          triggerAutoFallback();
+        }
+      }, 9000);
+    }
+
+    return () => {
+      if (iframeTimeoutRef.current) {
+        clearTimeout(iframeTimeoutRef.current);
+        iframeTimeoutRef.current = null;
+      }
+    };
+  }, [playerSrc, mirrors, activeMirror]);
 
   const getScopedKey = (key: string, profile: string) => {
     if (profile === 'Utama') return key;
@@ -650,7 +767,8 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
     if (source === initialSourceType) {
       setData(initialData);
       if (initialData.episodes && initialData.episodes.length > 0) {
-        const defaultEp = type === 'drama' 
+        const initialIsAsc = checkIsEpisodesAscending(initialData.episodes, type);
+        const defaultEp = initialIsAsc 
           ? initialData.episodes[0] 
           : initialData.episodes[initialData.episodes.length - 1];
         loadEpisode(defaultEp);
@@ -707,7 +825,8 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
         }
 
         if (!targetEp) {
-          targetEp = type === 'drama' 
+          const targetIsAsc = checkIsEpisodesAscending(updatedData.episodes, type);
+          targetEp = targetIsAsc 
             ? updatedData.episodes[0] 
             : updatedData.episodes[updatedData.episodes.length - 1];
         }
@@ -722,7 +841,8 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
       setData(initialData);
       
       if (initialData.episodes && initialData.episodes.length > 0) {
-        const defaultEp = type === 'drama' 
+        const initialIsAsc = checkIsEpisodesAscending(initialData.episodes, type);
+        const defaultEp = initialIsAsc 
           ? initialData.episodes[0] 
           : initialData.episodes[initialData.episodes.length - 1];
         loadEpisode(defaultEp);
@@ -986,13 +1106,18 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
 
   const triggerAutoFallback = () => {
     if (mirrors.length <= 1 || !activeMirror) return;
-    const currentIdx = mirrors.findIndex(m => m.playerText === activeMirror.playerText);
+    const currentIdx = mirrors.findIndex(m => 
+      m.playerText === activeMirror.playerText ||
+      (m.payload?.src && m.payload.src === activeMirror.payload?.src) ||
+      (m.payload?.id && m.payload.id === activeMirror.payload?.id)
+    );
     if (currentIdx !== -1 && currentIdx < mirrors.length - 1) {
       const nextMirror = mirrors[currentIdx + 1];
-      showHUD(`Error dideteksi, beralih ke: ${nextMirror.playerText}`);
+      showHUD(`Gagal memuat, beralih ke: ${nextMirror.playerText}`);
       selectMirror(nextMirror);
     } else {
       showHUD("Semua server mirror telah dicoba.");
+      setError("Semua server mirror telah dicoba dan tidak merespons. Silakan coba episode atau server alternatif.");
     }
   };
 
@@ -1133,27 +1258,27 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
     if (!activeEpisode || !data.episodes) return false;
     const idx = data.episodes.findIndex(ep => ep.slug === activeEpisode.slug);
     if (idx === -1) return false;
-    return type === 'drama' ? idx < data.episodes.length - 1 : idx > 0;
+    return isAscending ? idx < data.episodes.length - 1 : idx > 0;
   };
 
   const hasPrevEpisode = () => {
     if (!activeEpisode || !data.episodes) return false;
     const idx = data.episodes.findIndex(ep => ep.slug === activeEpisode.slug);
     if (idx === -1) return false;
-    return type === 'drama' ? idx > 0 : idx < data.episodes.length - 1;
+    return isAscending ? idx > 0 : idx < data.episodes.length - 1;
   };
 
   const playNextEpisode = () => {
     if (!hasNextEpisode() || !activeEpisode || !data.episodes) return;
     const idx = data.episodes.findIndex(ep => ep.slug === activeEpisode.slug);
-    const nextEp = type === 'drama' ? data.episodes[idx + 1] : data.episodes[idx - 1];
+    const nextEp = isAscending ? data.episodes[idx + 1] : data.episodes[idx - 1];
     loadEpisode(nextEp);
   };
 
   const playPrevEpisode = () => {
     if (!hasPrevEpisode() || !activeEpisode || !data.episodes) return;
     const idx = data.episodes.findIndex(ep => ep.slug === activeEpisode.slug);
-    const prevEp = type === 'drama' ? data.episodes[idx - 1] : data.episodes[idx + 1];
+    const prevEp = isAscending ? data.episodes[idx - 1] : data.episodes[idx + 1];
     loadEpisode(prevEp);
   };
 
@@ -1171,9 +1296,9 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
 
       // Fallback to default episode if not specified or not found in list
       if (!targetEp) {
-        targetEp = type === 'drama' 
+        targetEp = isAscending 
           ? data.episodes[0] 
-          : data.episodes[data.episodes.length - 1]; // Anime/Donghua release lists are in reverse order
+          : data.episodes[data.episodes.length - 1];
       }
 
       const timer = setTimeout(() => {
@@ -1501,7 +1626,12 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                         allowFullScreen
                         scrolling="no"
                         referrerPolicy="no-referrer"
-                        sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-top-navigation"
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+                        onLoad={handleIframeLoad}
+                        onError={() => {
+                          showHUD("Iframe gagal dimuat, beralih ke mirror berikutnya...");
+                          triggerAutoFallback();
+                        }}
                       />
                     );
                   })()}
@@ -1657,7 +1787,15 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
                           : `${m.playerText} (${m.quality})`}
                       </button>
                     ))}
-
+                    {mirrors.length > 1 && (
+                      <button
+                        onClick={triggerAutoFallback}
+                        className="text-xs px-2.5 py-1 rounded-full font-bold bg-violet-600/20 text-violet-300 hover:bg-violet-600/40 border border-violet-500/30 transition-all flex items-center gap-1 cursor-pointer"
+                        title="Beralih ke server mirror berikutnya jika pemutar bermasalah"
+                      >
+                        <RefreshCw size={11} /> Ganti Mirror
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1783,30 +1921,137 @@ export default function WatchClient({ initialData, type, slug, initialSource }: 
             )}
 
             {/* Episode List Container */}
-            <div className="flex flex-col gap-4 p-5 glass-card rounded-2xl">
-              <div className="flex items-center gap-2 border-b border-white/5 pb-3">
-                <List size={18} className="text-violet-400" />
-                <span className="font-bold text-sm text-slate-200">Daftar Episode</span>
-              </div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 max-h-[220px] overflow-y-auto pr-2">
-                {data.episodes.map((ep, idx) => (
-                  <button
-                    key={ep.slug}
-                    onClick={() => loadEpisode(ep)}
-                    className={`p-2.5 rounded-xl border text-xs font-extrabold transition-all truncate text-center flex items-center justify-center gap-1.5 ${
-                      activeEpisode?.slug === ep.slug
-                        ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 border-transparent text-white shadow-md'
-                        : watchedEpisodes.includes(ep.slug)
-                          ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400 hover:bg-emerald-900/40'
-                          : 'bg-white/5 border-white/5 text-slate-300 hover:bg-white/10 hover:border-white/10'
-                    }`}
-                  >
-                    {watchedEpisodes.includes(ep.slug) && activeEpisode?.slug !== ep.slug && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0 animate-pulse" />
+            <div className="flex flex-col gap-3 p-5 glass-card rounded-2xl">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-2">
+                  <List size={18} className="text-violet-400" />
+                  <span className="font-bold text-sm text-slate-200">
+                    Daftar Episode ({data.episodes.length})
+                  </span>
+                </div>
+
+                {/* Quick Episode Filter / Search */}
+                {data.episodes.length > 12 && (
+                  <div className="flex items-center gap-1.5 bg-slate-900/80 border border-white/10 rounded-xl px-2.5 py-1 text-xs focus-within:border-violet-500/50">
+                    <Search size={12} className="text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Cari episode..."
+                      value={episodeSearchQuery}
+                      onChange={(e) => setEpisodeSearchQuery(e.target.value)}
+                      className="bg-transparent text-slate-200 placeholder-slate-500 outline-none w-24 sm:w-28 text-xs font-medium"
+                    />
+                    {episodeSearchQuery && (
+                      <button onClick={() => setEpisodeSearchQuery('')} className="text-slate-500 hover:text-white cursor-pointer">
+                        <X size={12} />
+                      </button>
                     )}
-                    {getCleanEpisodeNumber(ep.title, data.episodes.length - idx, ep.slug)}
-                  </button>
-                ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Episode Chunks Pagination (> 25 episodes) */}
+              {!episodeSearchQuery && data.episodes.length > EPISODES_PER_CHUNK && (() => {
+                const totalChunks = Math.ceil(data.episodes.length / EPISODES_PER_CHUNK);
+                const getChunkLabel = (cIdx: number) => {
+                  const sliceStart = cIdx * EPISODES_PER_CHUNK;
+                  const sliceEnd = Math.min((cIdx + 1) * EPISODES_PER_CHUNK, data.episodes.length) - 1;
+                  const num1 = isAscending ? (sliceStart + 1) : (data.episodes.length - sliceStart);
+                  const num2 = isAscending ? (sliceEnd + 1) : (data.episodes.length - sliceEnd);
+                  const minNum = Math.min(num1, num2);
+                  const maxNum = Math.max(num1, num2);
+                  return `Ep ${minNum} - ${maxNum}`;
+                };
+
+                return (
+                  <div className="flex flex-col gap-2">
+                    {/* Mobile Dropdown for Chunk selection */}
+                    <div className="sm:hidden w-full">
+                      <select
+                        value={activeChunkIndex}
+                        onChange={(e) => setActiveChunkIndex(Number(e.target.value))}
+                        className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none focus:border-violet-500 cursor-pointer"
+                      >
+                        {Array.from({ length: totalChunks }).map((_, cIdx) => (
+                          <option key={cIdx} value={cIdx}>
+                            {getChunkLabel(cIdx)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Desktop Horizontal Chunk Tabs */}
+                    <div className="hidden sm:flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                      {Array.from({ length: totalChunks }).map((_, cIdx) => {
+                        const isActive = activeChunkIndex === cIdx;
+                        return (
+                          <button
+                            key={cIdx}
+                            onClick={() => setActiveChunkIndex(cIdx)}
+                            className={`text-[11px] px-3 py-1 rounded-lg font-bold flex-shrink-0 transition-all cursor-pointer ${
+                              isActive
+                                ? 'bg-violet-600 text-white shadow-md'
+                                : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                            }`}
+                          >
+                            {getChunkLabel(cIdx)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Episode Grid (Responsive) */}
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-[240px] overflow-y-auto pr-1">
+                {(() => {
+                  const episodesToShow = episodeSearchQuery.trim()
+                    ? data.episodes.filter(ep => {
+                        const q = episodeSearchQuery.toLowerCase().trim();
+                        return ep.title.toLowerCase().includes(q) || ep.slug.toLowerCase().includes(q);
+                      })
+                    : data.episodes.slice(
+                        activeChunkIndex * EPISODES_PER_CHUNK,
+                        (activeChunkIndex + 1) * EPISODES_PER_CHUNK
+                      );
+
+                  if (episodesToShow.length === 0) {
+                    return (
+                      <div className="col-span-full py-4 text-center text-xs text-slate-500">
+                        Tidak ada episode yang cocok dengan pencarian.
+                      </div>
+                    );
+                  }
+
+                  return episodesToShow.map((ep) => {
+                    // Find actual index in complete episodes list for fallback numbering
+                    const overallIndex = data.episodes.findIndex(e => e.slug === ep.slug);
+                    const fallbackNum = overallIndex !== -1 
+                      ? (isAscending ? overallIndex + 1 : data.episodes.length - overallIndex) 
+                      : 1;
+
+                    return (
+                      <button
+                        key={ep.slug}
+                        onClick={() => loadEpisode(ep)}
+                        className={`p-2 rounded-xl border text-xs font-extrabold transition-all truncate text-center flex items-center justify-center gap-1 cursor-pointer ${
+                          activeEpisode?.slug === ep.slug
+                            ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 border-transparent text-white shadow-md'
+                            : watchedEpisodes.includes(ep.slug)
+                              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400 hover:bg-emerald-900/40'
+                              : 'bg-white/5 border-white/5 text-slate-300 hover:bg-white/10 hover:border-white/10'
+                        }`}
+                        title={ep.title}
+                      >
+                        {watchedEpisodes.includes(ep.slug) && activeEpisode?.slug !== ep.slug && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0 animate-pulse" />
+                        )}
+                        {getCleanEpisodeNumber(ep.title, fallbackNum, ep.slug)}
+                      </button>
+                    );
+                  });
+                })()}
               </div>
             </div>
 

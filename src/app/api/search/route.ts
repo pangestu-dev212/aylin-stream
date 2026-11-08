@@ -12,6 +12,86 @@ import { searchManga } from '@/lib/manga-scraper';
 import { searchShortDrama } from '@/lib/shortdrama-scraper';
 import { isSafeQuery, filterSafeList } from '@/lib/content-filter';
 
+// Strict timeout wrapper so hanging providers never stall the aggregator
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+  ]);
+}
+
+// Item hierarchy: Full Series (10) > Movie (8) > Batch (3) > Single Episode post (1)
+function getItemScore(title: string, slug: string): number {
+  const t = title.toLowerCase();
+  const s = slug.toLowerCase();
+  
+  if (/\b(?:episode\s*\d+|ep\s*\d+)\b/i.test(t) || /[-_]episode[-_]\d+/i.test(s) || /[-_]ep[-_]\d+/i.test(s)) {
+    return 1;
+  }
+  if (/\b(?:batch|lengkap|bd\s*batch|pack)\b/i.test(t) || s.includes('batch')) {
+    return 3;
+  }
+  if (/\b(?:movie|film)\b/i.test(t) || s.includes('movie') || s.includes('film')) {
+    return 8;
+  }
+  return 10;
+}
+
+function getDedupeKey(title: string, slug: string, type: string = 'anime'): string {
+  const isMovie = /\b(?:movie|film)\b/i.test(title) || slug.toLowerCase().includes('movie');
+  const base = title
+    .toLowerCase()
+    .replace(/\b(?:subtitle\s+indonesia|sub\s+indo|eng\s+sub|tamatan|ongoing)\b/gi, '')
+    .replace(/\b(?:batch|lengkap|bd\s*batch|pack)\b/gi, '')
+    .replace(/\b(?:episode\s*\d+|ep\s*\d+)\b/gi, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .trim();
+
+  // Namespace by media category so Manga/ShortDrama never collide with Anime/Video series
+  const category = (type === 'manga' || type === 'shortdrama') ? type : 'video';
+  return `${category}_${base}${isMovie ? '_movie' : ''}`;
+}
+
+function computeRelevance(item: { title: string; slug: string; source?: string }, query: string): number {
+  const t = item.title.toLowerCase();
+  const q = query.toLowerCase().trim();
+  const qWords = q.split(/\s+/).filter(Boolean);
+
+  let score = 0;
+
+  // Title match accuracy
+  if (t === q) {
+    score += 120;
+  } else if (t.startsWith(q)) {
+    score += 70;
+  } else if (t.includes(q)) {
+    score += 45;
+  }
+
+  // Word overlap
+  const matchedWords = qWords.filter(w => t.includes(w)).length;
+  score += matchedWords * 15;
+
+  // Provider weighting: Prioritize active anime/donghua providers over older drama
+  switch (item.source) {
+    case 'samehadaku': score += 28; break;
+    case 'gojonime': score += 26; break;
+    case 'otakudesu': score += 24; break;
+    case 'anichin': score += 20; break;
+    case 'animexin': score += 18; break;
+    case 'donghuastream': score += 16; break;
+    case 'manga': score += 12; break;
+    case 'shortdrama': score += 10; break;
+    case 'juraganfilm': score += 4; break;
+    default: score += 10; break;
+  }
+
+  // Bonus for full series/movie over single episode posts
+  score += getItemScore(item.title, item.slug) * 2;
+
+  return score;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -22,35 +102,37 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, results: [] });
     }
 
-    // Direct single source search
+    const PROVIDER_TIMEOUT_MS = 3500;
+
+    // Direct single source search with timeout racing
     if (source === 'samehadaku') {
-      const results = await getSamehadakuSearch(query).catch(() => []);
+      const results = await withTimeout(getSamehadakuSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []);
       return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'gojonime') {
-      const results = await getGojonimeSearch(query).catch(() => []);
+      const results = await withTimeout(getGojonimeSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []);
       return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'animexin') {
-      const results = await getAnimeXinSearch(query).catch(() => []);
+      const results = await withTimeout(getAnimeXinSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []);
       return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'donghuastream') {
-      const results = await getDonghuastreamSearch(query).catch(() => []);
+      const results = await withTimeout(getDonghuastreamSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []);
       return NextResponse.json({ success: true, results: filterSafeList(results) });
     }
     if (source === 'manga') {
-      const results = await searchManga(query).catch(() => []);
+      const results = await withTimeout(searchManga(query).catch(() => []), PROVIDER_TIMEOUT_MS, []);
       const mapped = results.map(r => ({ ...r, type: 'manga' as const }));
       return NextResponse.json({ success: true, results: filterSafeList(mapped) });
     }
     if (source === 'shortdrama') {
-      const results = await searchShortDrama(query).catch(() => []);
+      const results = await withTimeout(searchShortDrama(query).catch(() => []), PROVIDER_TIMEOUT_MS, []);
       const mapped = results.map(r => ({ ...r, type: 'shortdrama' as const }));
       return NextResponse.json({ success: true, results: filterSafeList(mapped) });
     }
 
-    // Fetch from all concurrently
+    // Fetch from all 9 providers concurrently with strict per-provider timeout racing
     const [
       otakuResults,
       sameResults,
@@ -62,15 +144,15 @@ export async function GET(req: NextRequest) {
       mangaResults,
       shortDramaResults
     ] = await Promise.all([
-      getOtakudesuSearch(query).catch(() => []),
-      getSamehadakuSearch(query).catch(() => []),
-      getGojonimeSearch(query).catch(() => []),
-      getAnichinSearch(query).catch(() => []),
-      getAnimeXinSearch(query).catch(() => []),
-      getDonghuastreamSearch(query).catch(() => []),
-      getJuraganfilmSearch(query).catch(() => []),
-      searchManga(query).catch(() => []),
-      searchShortDrama(query).catch(() => [])
+      withTimeout(getOtakudesuSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(getSamehadakuSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(getGojonimeSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(getAnichinSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(getAnimeXinSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(getDonghuastreamSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(getJuraganfilmSearch(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(searchManga(query).catch(() => []), PROVIDER_TIMEOUT_MS, []),
+      withTimeout(searchShortDrama(query).catch(() => []), PROVIDER_TIMEOUT_MS, [])
     ]);
 
     const mappedOtaku = otakuResults.map(i => ({ ...i, type: 'anime' as const, source: 'otakudesu' }));
@@ -86,7 +168,8 @@ export async function GET(req: NextRequest) {
       url: `/manga/${item.slug}`, 
       img: item.img, 
       ep: item.latestChapter, 
-      type: 'manga' as const 
+      type: 'manga' as const,
+      source: 'manga'
     }));
     const mappedShortDrama = shortDramaResults.map(item => ({
       title: item.title,
@@ -95,9 +178,10 @@ export async function GET(req: NextRequest) {
       img: item.cover,
       ep: `${item.chapterCount} Ep`,
       type: 'shortdrama' as const,
+      source: 'shortdrama'
     }));
 
-    // Concatenate, placing anime sources first
+    // Concatenate all results
     const combinedRaw = [
       ...mappedOtaku,
       ...mappedSame,
@@ -110,24 +194,27 @@ export async function GET(req: NextRequest) {
       ...mappedManga
     ];
 
-    // Deduplicate by normalized title
-    const uniqueMap = new Map<string, typeof combinedRaw[number]>();
+    // Deduplicate: replace batch/episode clutter with full series entries
+    const uniqueMap = new Map<string, { item: typeof combinedRaw[number]; score: number; relevance: number }>();
     for (const item of combinedRaw) {
-      const normTitle = item.title
-        .toLowerCase()
-        .replace(/subtitle\s+indonesia/g, '')
-        .replace(/sub\s+indo/g, '')
-        .replace(/eng\s+sub/g, '')
-        .replace(/[^a-z0-9]/g, '')
-        .trim();
+      const key = getDedupeKey(item.title, item.slug, item.type);
+      if (!key) continue;
 
-      if (normTitle && !uniqueMap.has(normTitle)) {
-        uniqueMap.set(normTitle, item);
+      const itemScore = getItemScore(item.title, item.slug);
+      const relevance = computeRelevance(item, query);
+
+      const existing = uniqueMap.get(key);
+      if (!existing || itemScore > existing.score || (itemScore === existing.score && relevance > existing.relevance)) {
+        uniqueMap.set(key, { item, score: itemScore, relevance });
       }
     }
 
-    const combined = Array.from(uniqueMap.values());
-    const safeCombined = filterSafeList(combined);
+    // Sort by relevance score descending
+    const sortedCombined = Array.from(uniqueMap.values())
+      .sort((a, b) => b.relevance - a.relevance)
+      .map(entry => entry.item);
+
+    const safeCombined = filterSafeList(sortedCombined);
 
     return NextResponse.json({ success: true, results: safeCombined });
   } catch (err) {

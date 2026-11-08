@@ -7,7 +7,8 @@ import {
   getAnimeXinEpisode, 
   getDonghuastreamEpisode, 
   getGojonimeEpisode,
-  resolveOtakudesuMirror 
+  resolveOtakudesuMirror,
+  isDeadHost 
 } from '@/lib/stream-scraper';
 
 export async function GET(req: NextRequest) {
@@ -28,8 +29,8 @@ export async function GET(req: NextRequest) {
 
     if (type === 'anime' && id && i && q) {
       const src = await resolveOtakudesuMirror(parseInt(id), parseInt(i), q);
-      if (!src) {
-        return NextResponse.json({ success: false, error: 'Failed to resolve mirror link' }, { status: 500 });
+      if (!src || isDeadHost(src)) {
+        return NextResponse.json({ success: false, error: 'Failed to resolve mirror link or host is offline' }, { status: 500 });
       }
       return NextResponse.json({ success: true, src });
     }
@@ -64,6 +65,14 @@ export async function GET(req: NextRequest) {
 
     if (!data) {
       return NextResponse.json({ success: false, error: 'Episode not found' }, { status: 404 });
+    }
+
+    // Filter dead hosts from mirrors
+    if (Array.isArray(data.mirrors)) {
+      data.mirrors = data.mirrors.filter((m: any) => {
+        const target = m.payload?.src || m.payload?.directSrc;
+        return !isDeadHost(target) && !isDeadHost(m.playerText);
+      });
     }
 
     return NextResponse.json({ success: true, data });
